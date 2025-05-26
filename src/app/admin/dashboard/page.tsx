@@ -636,8 +636,9 @@ export default function AdminDashboardPage() {
                                   <Label htmlFor={`delete-switch-${section.key}`} className="text-sm font-medium text-destructive/90 cursor-pointer">
                                       {section.label}
                                   </Label>
-                                  {section.description && (
+                                  {('description' in section ? section.description : undefined) && (
                                     <p className="text-xs text-destructive/70 mt-0.5">
+                                      {/* @ts-expect-error: description may not exist on all section types */}
                                       {section.description}
                                     </p>
                                   )}
@@ -748,4 +749,3 @@ export default function AdminDashboardPage() {
   );
 }
 
-    

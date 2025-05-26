@@ -78,22 +78,13 @@ async function getHeroContentData(): Promise<HeroContent | null> {
 }
 
 
-interface HomePageProps {
-  params?: { [key: string]: string | string[] | undefined };
-  searchParams?: { [key: string]: string | string[] | undefined };
-}
-
-export default async function HomePage(props: HomePageProps) {
-  // const resolvedParams = props.params ? use(props.params) : {};
-  // const resolvedSearchParams = props.searchParams ? use(props.searchParams) : {};
-
+export default async function HomePage() {
   console.log('[HomePage] Starting to render HomePage component...');
   const heroContent = await getHeroContentData();
   console.log('[HomePage] Rendering HomePage. Hero content fetched (main_name):', heroContent?.main_name);
   if (heroContent?.social_media_links) {
     console.log('[HomePage] Passing social_media_links to HeroSection:', JSON.stringify(heroContent.social_media_links));
   }
-
 
   return (
     <>

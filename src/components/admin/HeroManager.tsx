@@ -275,9 +275,9 @@ export default function HeroManager() {
                                 size="sm" 
                                 onClick={() => {
                                   const linkToEdit: HeroSocialLinkItem = {
-                                    id: item.id, // item.id is string | undefined from Zod optional
-                                    label: item.label, // item.label is string from Zod min(1)
-                                    url: item.url,     // item.url is string from Zod url()
+                                    id: typeof item.id === 'string' ? item.id : crypto.randomUUID(), // Ensure id is always a string
+                                    label: item.label,
+                                    url: item.url,
                                     icon_image_url: (item.icon_image_url && item.icon_image_url.trim() !== '') ? item.icon_image_url : null,
                                   };
                                   handleOpenSocialLinkModal(linkToEdit, index);
@@ -368,4 +368,3 @@ export default function HeroManager() {
   );
 }
 
-    

@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
-import { UploadCloud, PlusCircle, Edit, Trash2, Briefcase, ExternalLink, Github, Rocket, Wrench, FlaskConical, CheckCircle2, Archive, ClipboardList } from 'lucide-react';
+import { UploadCloud, PlusCircle, Edit, Trash2, Briefcase, ExternalLink, Github, Rocket, Wrench, FlaskConical, CheckCircle2, Archive, ClipboardList, type LucideIcon } from 'lucide-react';
 import { supabase } from '@/lib/supabaseClient';
 import type { Project, ProjectStatus } from '@/types/supabase';
 import Image from 'next/image';
@@ -80,7 +80,7 @@ export default function ProjectsManager() {
 
   const projectForm = useForm<ProjectFormData>({
     resolver: zodResolver(projectSchema),
-    defaultValues: { title: '', description: '', image_url: '', live_demo_url: '', repo_url: '', tags: '', status: 'Concept', progress: 0 }
+    defaultValues: { title: '', description: '', image_url: '', live_demo_url: '', repo_url: '', tags: [], status: 'Concept', progress: 0 }
   });
 
   const currentProjectImageUrlForForm = projectForm.watch('image_url');
@@ -317,7 +317,7 @@ export default function ProjectsManager() {
         image_url: project.imageUrl || '',
         live_demo_url: project.liveDemoUrl || '',
         repo_url: project.repoUrl || '',
-        tags: (project.tags || []).join(', '),
+        tags: Array.isArray(project.tags) ? project.tags : [],
         status: project.status || 'Concept',
         progress: project.progress === null || project.progress === undefined ? null : Number(project.progress),
       });
@@ -325,7 +325,7 @@ export default function ProjectsManager() {
     } else {
       setCurrentProject(null);
       setCurrentDbProjectImageUrl(null);
-      projectForm.reset({ title: '', description: '', image_url: '', live_demo_url: '', repo_url: '', tags: '', status: 'Concept', progress: 0 });
+      projectForm.reset({ title: '', description: '', image_url: '', live_demo_url: '', repo_url: '', tags: [], status: 'Concept', progress: 0 });
       setProjectImageFile(null);
       setProjectImagePreview(null);
     }

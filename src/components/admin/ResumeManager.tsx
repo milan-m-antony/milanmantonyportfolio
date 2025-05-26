@@ -1,4 +1,3 @@
-
 "use client";
 
 import React, { useEffect, useState, type ChangeEvent } from 'react';
@@ -238,7 +237,31 @@ export default function ResumeManager() {
   const onExperienceSubmit: SubmitHandler<ResumeExperienceFormData> = async (formData) => { const dataToSave = { ...formData, description_points: formData.description_points || [], icon_image_url: formData.icon_image_url?.trim() === '' ? null : formData.icon_image_url, sort_order: Number(formData.sort_order) || 0 }; let response; if (formData.id) { response = await supabase.from('resume_experience').update(dataToSave).eq('id', formData.id).select(); } else { const { id, ...insertData } = dataToSave; response = await supabase.from('resume_experience').insert(insertData).select(); } if (response.error) { toast({ title: "Error saving experience", description: response.error.message, variant: "destructive" }); } else { toast({ title: "Success", description: "Experience saved." }); fetchExperiences(); setIsExperienceModalOpen(false); router.refresh(); }};
   const handleDeleteExperience = async () => { if (!experienceToDelete) return; const { error } = await supabase.from('resume_experience').delete().eq('id', experienceToDelete.id); if (error) { toast({ title: "Error deleting experience", description: error.message, variant: "destructive" }); } else { toast({ title: "Success", description: "Experience deleted." }); fetchExperiences(); router.refresh(); } setExperienceToDelete(null); setShowExperienceDeleteConfirm(false); };
   const triggerExperienceDeleteConfirmation = (experience: ResumeExperience) => { setExperienceToDelete(experience); setShowExperienceDeleteConfirm(true); };
-  const handleOpenExperienceModal = (experience?: ResumeExperience) => { setCurrentExperience(experience || null); experienceForm.reset(experience ? { ...experience, description_points: experience.description_points?.join('\n') || '', icon_image_url: experience.icon_image_url || '', sort_order: Number(experience.sort_order ?? 0), } : { job_title: '', company_name: '', date_range: '', description_points: [], icon_image_url: '', sort_order: 0 }); setIsExperienceModalOpen(true); };
+  const handleOpenExperienceModal = (experience?: ResumeExperience) => {
+    setCurrentExperience(experience || null);
+    experienceForm.reset(
+      experience
+        ? {
+            ...experience,
+            description_points: Array.isArray(experience.description_points)
+              ? experience.description_points
+              : typeof experience.description_points === 'string' && experience.description_points
+                ? [experience.description_points]
+                : [],
+            icon_image_url: experience.icon_image_url || '',
+            sort_order: Number(experience.sort_order ?? 0),
+          }
+        : {
+            job_title: '',
+            company_name: '',
+            date_range: '',
+            description_points: [],
+            icon_image_url: '',
+            sort_order: 0,
+          }
+    );
+    setIsExperienceModalOpen(true);
+  };
 
   // Education CRUD
   const fetchEducationItems = async () => { setIsLoadingEducation(true); const { data, error } = await supabase.from('resume_education').select('*').order('sort_order', { ascending: true }); if (error) { toast({ title: "Error fetching education", description: error.message, variant: "destructive" }); setEducationItems([]); } else { setEducationItems((data || []).map(item => ({ ...item, icon_image_url: item.icon_image_url || null }))); } setIsLoadingEducation(false); };
@@ -377,6 +400,5 @@ export default function ResumeManager() {
   );
 }
 
-    
 
-    
+

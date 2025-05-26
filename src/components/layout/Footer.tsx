@@ -1,4 +1,3 @@
-
 "use client";
 
 import { FileText, ShieldCheck } from 'lucide-react';
@@ -58,7 +57,7 @@ export default function Footer({ termsContentData, privacyPolicyData }: FooterPr
 
   const handleOpenModal = (type: ModalContentType) => {
     // console.log(`[Footer] handleOpenModal called for type: ${type}`);
-    let newModalContent = { title: '', content: '<p>Content currently unavailable. Please check back later.</p>', lastUpdated: null };
+    let newModalContent: { title: string, content: string, lastUpdated: string | null } = { title: '', content: '<p>Content currently unavailable. Please check back later.</p>', lastUpdated: null };
 
     if (type === 'terms') {
       if (termsContentData) {
@@ -66,7 +65,7 @@ export default function Footer({ termsContentData, privacyPolicyData }: FooterPr
         newModalContent = {
           title: termsContentData.title || 'Terms & Conditions',
           content: termsContentData.content || '<p>Terms and Conditions content not available.</p>',
-          lastUpdated: formatLastUpdated(termsContentData.updated_at)
+          lastUpdated: formatLastUpdated(termsContentData.updated_at) ?? null
         };
       } else {
         // console.log('[Footer] termsContentData is null for modal.');
@@ -77,7 +76,7 @@ export default function Footer({ termsContentData, privacyPolicyData }: FooterPr
         newModalContent = {
           title: privacyPolicyData.title || 'Privacy Policy',
           content: privacyPolicyData.content || '<p>Privacy Policy content not available.</p>',
-          lastUpdated: formatLastUpdated(privacyPolicyData.updated_at)
+          lastUpdated: formatLastUpdated(privacyPolicyData.updated_at) ?? null
         };
       } else {
         // console.log('[Footer] privacyPolicyData is null for modal.');

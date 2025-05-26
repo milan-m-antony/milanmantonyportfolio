@@ -1,4 +1,3 @@
-
 "use client";
 
 import React, { useEffect, useState, type ChangeEvent } from 'react';
@@ -247,10 +246,10 @@ export default function CertificationsManager() {
         await supabase.from('admin_activity_log').insert({ action_type: 'CERTIFICATION_UPDATED', description: `Certification "${formData.title}" updated.`, user_identifier: (await supabase.auth.getUser()).data.user?.email });
       }
     } else { // Add new
-      const { id, ...insertData } = dataForSupabase; // Supabase generates ID
+      // Supabase generates ID, so just use dataForSupabase directly
       const { data: newCert, error: insertError } = await supabase
         .from('certifications')
-        .insert(insertData)
+        .insert(dataForSupabase)
         .select()
         .single();
       if (insertError) {
@@ -462,6 +461,5 @@ export default function CertificationsManager() {
     </Card>
   );
 }
-    
 
-    
+

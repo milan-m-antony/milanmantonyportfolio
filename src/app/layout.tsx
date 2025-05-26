@@ -88,7 +88,7 @@ export default async function RootLayout({
         <link rel="icon" href="/favicon_io/favicon.ico" />
       </head>
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
-        <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
+        <ThemeProvider defaultTheme="system">
           <VisitTracker /> {/* Add VisitTracker here, it's a client component */}
           <LivePresenceTracker /> {/* Add LivePresenceTracker here */}
           <Preloader />
