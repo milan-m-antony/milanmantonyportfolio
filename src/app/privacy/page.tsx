@@ -9,6 +9,3 @@ export default function PrivacyPage() {
     </main>
   );
 }
-
-// Ensure module export for Next.js
-export const dynamic = 'auto';
