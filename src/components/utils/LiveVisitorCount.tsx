@@ -18,14 +18,14 @@ const LiveVisitorCount: React.FC = () => {
       return;
     }
 
-    const channel = supabase.channel(PRESENCE_CHANNEL_NAME, {
-      // This component is only observing, so it doesn't need to set its own presence key
-      // config: {
-      //   presence: {
-      //     key: 'observer-' + Math.random().toString(36).substring(2, 9), // Optional: give observer a unique key if needed for debugging
-      //   },
-      // },
-    });
+ const channel = supabase.channel(PRESENCE_CHANNEL_NAME, {
+  config: {
+    presence: {
+      key: `visitor-${Math.random().toString(36).slice(2)}`, // unique client key
+    },
+  },
+});
+
     channelRef.current = channel;
 
     const handleSync = () => {

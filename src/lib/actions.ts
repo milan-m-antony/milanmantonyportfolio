@@ -1,4 +1,3 @@
-
 "use server";
 
 import { z } from "zod";
@@ -91,11 +90,15 @@ const projectActionSchema = z.object({
 export async function addProjectAction(formData: FormData) {
   const rawData = Object.fromEntries(formData.entries());
   if (typeof rawData.tags === 'string') {
-    rawData.tags = rawData.tags.split(',').map(tag => tag.trim()).filter(Boolean);
+    rawData.tags = rawData.tags
+      .split(',')
+      .map(tag => tag.trim())
+      .filter(Boolean)
+      .join(','); // Now it's a string again
   } else {
-    rawData.tags = [];
+    rawData.tags = '';
   }
-  rawData.progress = rawData.progress ? parseInt(rawData.progress as string, 10) : null;
+  rawData.progress = rawData.progress ? rawData.progress : '';
 
 
   const validatedFields = projectActionSchema.safeParse(rawData);
@@ -120,12 +123,16 @@ export async function addProjectAction(formData: FormData) {
 
 export async function updateProjectAction(formData: FormData) {
   const rawData = Object.fromEntries(formData.entries());
-   if (typeof rawData.tags === 'string') {
-    rawData.tags = rawData.tags.split(',').map(tag => tag.trim()).filter(Boolean);
+  if (typeof rawData.tags === 'string') {
+    rawData.tags = rawData.tags
+      .split(',')
+      .map(tag => tag.trim())
+      .filter(Boolean)
+      .join(','); // Now it's a string again
   } else {
-    rawData.tags = [];
+    rawData.tags = '';
   }
-  rawData.progress = rawData.progress ? parseInt(rawData.progress as string, 10) : null;
+  rawData.progress = rawData.progress ? rawData.progress : '';
 
   const validatedFields = projectActionSchema.safeParse(rawData);
 

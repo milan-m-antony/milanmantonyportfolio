@@ -1,4 +1,3 @@
-
 // Based on your Supabase table structure
 // This file helps provide TypeScript types for your Supabase data.
 
@@ -93,11 +92,7 @@ export interface Database {
         Insert: Omit<AdminProfile, 'updated_at'> & { updated_at?: string; }
         Update: Partial<AdminProfile>
       }
-      site_settings: {
-        Row: SiteSettings
-        Insert: Omit<SiteSettings, 'updated_at'> & { updated_at?: string; }
-        Update: Partial<SiteSettings>
-      }
+   
       admin_activity_log: {
         Row: AdminActivityLog
         Insert: Omit<AdminActivityLog, 'id' | 'timestamp' | 'is_read'> & { id?: string; timestamp?: string; is_read?: boolean; }
