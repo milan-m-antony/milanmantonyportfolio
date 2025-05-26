@@ -18,35 +18,65 @@ export const dynamic = "force-dynamic";
 const PRIMARY_HERO_CONTENT_ID = '00000000-0000-0000-0000-000000000004';
 
 async function getHeroContentData(): Promise<HeroContent | null> {
+  console.log('[HomePage] Attempting to fetch hero content...');
   try {
-    const { data, error } = await supabase
+    const { data, error, status } = await supabase
       .from('hero_content')
       .select('id, main_name, subtitles, social_media_links, updated_at')
       .eq('id', PRIMARY_HERO_CONTENT_ID)
       .maybeSingle();
 
-    if (error || !data) return null;
+    if (error) {
+      console.error('[HomePage] Supabase error fetching hero_content:', {
+        message: error.message,
+        details: error.details,
+        hint: error.hint,
+        code: error.code,
+        status: status,
+      });
+      return null;
+    }
 
-    const mappedSocialLinks: HeroSocialLinkItem[] = Array.isArray(data.social_media_links)
-      ? data.social_media_links.map((link: any) => ({
-          id: link.id || crypto.randomUUID(),
+    if (!data) {
+      console.warn(`[HomePage] No hero_content found for ID: ${PRIMARY_HERO_CONTENT_ID}`);
+      return null;
+    }
+
+    console.log('[HomePage] Successfully fetched hero_content name:', data.main_name);
+    console.log('[HomePage] Raw hero_content social_media_links from Supabase:', JSON.stringify(data.social_media_links));
+
+    let mappedSocialLinks: HeroSocialLinkItem[] = [];
+    if (data.social_media_links && Array.isArray(data.social_media_links)) {
+      mappedSocialLinks = data.social_media_links.map((link: any, index: number): HeroSocialLinkItem => {
+        console.log(`[HomePage] Mapping social link ${index} from DB:`, JSON.stringify(link));
+        return {
+          id: link.id || crypto.randomUUID(), // Use existing DB id if available, or generate client-side UUID
           label: link.label || 'Social Link',
           url: link.url || '#',
-          icon_image_url: link.icon_image_url || null,
-        }))
-      : [];
+          icon_image_url: link.icon_image_url || null, // Use icon_image_url
+        };
+      });
+    } else if (data.social_media_links) {
+      console.warn("[HomePage] hero_content.social_media_links is not an array:", data.social_media_links);
+    }
+    console.log('[HomePage] Mapped social_media_links for HeroSection:', JSON.stringify(mappedSocialLinks));
 
+    // Ensure the returned object matches HeroContent, especially social_media_links
     return {
       id: data.id,
       main_name: data.main_name,
       subtitles: data.subtitles,
-      social_media_links: mappedSocialLinks,
+      social_media_links: mappedSocialLinks, // Use the correctly typed and mapped array
       updated_at: data.updated_at,
-    } as HeroContent;
-  } catch {
+    } as HeroContent; // Asserting as HeroContent which expects StoredHeroSocialLink[] after mapping if needed.
+                     // For passing to client component, HeroSocialLinkItem[] is fine.
+
+  } catch (e: any) {
+    console.error('[HomePage] EXCEPTION fetching hero_content:', e.message, e);
     return null;
   }
 }
+
 
 interface HomePageProps {
   params?: { [key: string]: string | string[] | undefined };
@@ -63,6 +93,7 @@ export default async function HomePage(props: HomePageProps) {
   if (heroContent?.social_media_links) {
     console.log('[HomePage] Passing social_media_links to HeroSection:', JSON.stringify(heroContent.social_media_links));
   }
+
 
   return (
     <>
