@@ -52,6 +52,384 @@ import LiveVisitorCount from '@/components/utils/LiveVisitorCount';
 
 const ADMIN_PROFILE_ID = '00000000-0000-0000-0000-00000000000A'; 
 
+// Helper function to format activity details
+const formatActivityDetails = (action_type: string, details: any): ReactNode | null => {
+  if (!details) return null;
+
+  let parsedDetails = details;
+  if (typeof details === 'string') {
+    try {
+      parsedDetails = JSON.parse(details);
+    } catch (e) {
+      console.warn("Could not parse activity details string:", details, e);
+      return <pre className="mt-1 text-xs bg-muted p-1.5 rounded-md overflow-x-auto">{details}</pre>; // fallback for unparsable string
+    }
+  }
+  if (typeof parsedDetails !== 'object' || parsedDetails === null) {
+    return <pre className="mt-1 text-xs bg-muted p-1.5 rounded-md overflow-x-auto">{JSON.stringify(parsedDetails, null, 2)}</pre>; // fallback for non-object
+  }
+
+  const renderDetailLine = (label: string, value: any) => (
+    <div key={label} className="text-xs"><span className="font-semibold">{label}:</span> {String(value)}</div>
+  );
+
+  switch (action_type) {
+    case 'PROJECT_CREATED':
+    case 'PROJECT_UPDATED':
+      return (
+        <div className="mt-1 space-y-0.5">
+          {parsedDetails.projectId && renderDetailLine('Project ID', parsedDetails.projectId)}
+        </div>
+      );
+    case 'PROJECT_DELETED':
+      return (
+        <div className="mt-1 space-y-0.5">
+          {parsedDetails.deletedTitle && renderDetailLine('Deleted Project', parsedDetails.deletedTitle)}
+          {parsedDetails.projectId && renderDetailLine('Project ID', parsedDetails.projectId)}
+        </div>
+      );
+    case 'SKILL_CATEGORY_CREATED':
+    case 'SKILL_CATEGORY_UPDATED':
+      return (
+        <div className="mt-1 space-y-0.5">
+          {parsedDetails.categoryId && renderDetailLine('Category ID', parsedDetails.categoryId)}
+        </div>
+      );
+    case 'SKILL_CATEGORY_DELETED':
+      return (
+        <div className="mt-1 space-y-0.5">
+          {parsedDetails.deletedName && renderDetailLine('Deleted Category', parsedDetails.deletedName)}
+          {parsedDetails.categoryId && renderDetailLine('Category ID', parsedDetails.categoryId)}
+        </div>
+      );
+    case 'SKILL_CREATED':
+    case 'SKILL_UPDATED':
+      return (
+        <div className="mt-1 space-y-0.5">
+          {parsedDetails.skillId && renderDetailLine('Skill ID', parsedDetails.skillId)}
+          {parsedDetails.categoryId && renderDetailLine('Parent Category ID', parsedDetails.categoryId)}
+        </div>
+      );
+    case 'SKILL_DELETED':
+      return (
+        <div className="mt-1 space-y-0.5">
+          {parsedDetails.deletedName && renderDetailLine('Deleted Skill', parsedDetails.deletedName)}
+          {parsedDetails.skillId && renderDetailLine('Skill ID', parsedDetails.skillId)}
+          {parsedDetails.categoryId && renderDetailLine('Parent Category ID', parsedDetails.categoryId)}
+        </div>
+      );
+    case 'MAINTENANCE_MODE_ENABLED':
+    case 'MAINTENANCE_MODE_DISABLED':
+      return <div className="mt-1 text-xs italic">Site setting changed.</div>;
+    case 'SITE_SETTINGS_UPDATED': // General settings update
+      return <div className="mt-1 text-xs italic">Site settings were updated.</div>;
+    case 'MAINTENANCE_MESSAGE_UPDATED':
+      return (
+        <div className="mt-1 space-y-0.5">
+          {parsedDetails.message && renderDetailLine('New Message', parsedDetails.message.length > 50 ? parsedDetails.message.substring(0, 47) + '...' : parsedDetails.message)}
+          {!parsedDetails.message && <div className="text-xs italic">Message cleared.</div>}
+        </div>
+      );
+    case 'PORTFOLIO_DATA_DELETED':
+      return (
+        <div className="mt-1 space-y-0.5">
+          {parsedDetails.deleted_sections_labels && parsedDetails.deleted_sections_labels.length > 0 &&
+            renderDetailLine('Deleted Sections', parsedDetails.deleted_sections_labels.join(', '))}
+          {(!parsedDetails.deleted_sections_labels || parsedDetails.deleted_sections_labels.length === 0) &&
+            <div className="text-xs italic">No specific sections detailed.</div>}
+        </div>
+      );
+    case 'ADMIN_LOGIN_SUCCESS':
+      return (
+        <div className="mt-1 space-y-0.5">
+          {parsedDetails.email && renderDetailLine('User Email', parsedDetails.email)}
+        </div>
+      );
+    case 'ADMIN_LOGIN_FAILURE':
+      if (details && typeof details === 'object') {
+        const email = 'attempt_email' in details ? String(details.attempt_email) : 'N/A';
+        const reason = 'error' in details ? String(details.error) : 'N/A';
+        return (
+          <>
+            <p className="font-medium">Login Attempt Details:</p>
+            <p>Attempted Email: {email}</p>
+            <p>Failure Reason: {reason}</p>
+          </>
+        );
+      }
+      return <p className="text-xs italic">No further details for failed login.</p>;
+    case 'ADMIN_LOGOUT_SUCCESS':
+      return (
+        <div className="mt-1 space-y-0.5">
+          {parsedDetails.email && renderDetailLine('User Email', parsedDetails.email)}
+        </div>
+      );
+    case 'HERO_CONTENT_UPDATED':
+      return (
+        <div className="mt-1 space-y-0.5">
+          {parsedDetails.main_name && renderDetailLine('Main Name', parsedDetails.main_name)}
+          {typeof parsedDetails.subtitles_count === 'number' && renderDetailLine('Subtitles', parsedDetails.subtitles_count)}
+          {typeof parsedDetails.social_links_count === 'number' && renderDetailLine('Social Links', parsedDetails.social_links_count)}
+        </div>
+      );
+    case 'ABOUT_CONTENT_UPDATED':
+      return (
+        <div className="mt-1 space-y-0.5">
+          {parsedDetails.headline && renderDetailLine('Headline', parsedDetails.headline)}
+          {parsedDetails.image_action && renderDetailLine('Image', parsedDetails.image_action.replace(/_/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase()))}
+        </div>
+      );
+    case 'TIMELINE_EVENT_CREATED':
+    case 'TIMELINE_EVENT_UPDATED':
+      return (
+        <div className="mt-1 space-y-0.5">
+          {parsedDetails.title && renderDetailLine('Event Title', parsedDetails.title)}
+          {parsedDetails.event_id && renderDetailLine('Event ID', parsedDetails.event_id)}
+          {parsedDetails.type && renderDetailLine('Type', parsedDetails.type)}
+        </div>
+      );
+    case 'TIMELINE_EVENT_DELETED':
+      return (
+        <div className="mt-1 space-y-0.5">
+          {parsedDetails.deleted_title && renderDetailLine('Deleted Event', parsedDetails.deleted_title)}
+          {parsedDetails.event_id && renderDetailLine('Event ID', parsedDetails.event_id)}
+          {parsedDetails.type && renderDetailLine('Type', parsedDetails.type)}
+        </div>
+      );
+    case 'CERTIFICATION_CREATED':
+    case 'CERTIFICATION_UPDATED':
+      return (
+        <div className="mt-1 space-y-0.5">
+          {parsedDetails.title && renderDetailLine('Certification Title', parsedDetails.title)}
+          {parsedDetails.issuer && renderDetailLine('Issuer', parsedDetails.issuer)}
+          {parsedDetails.certification_id && renderDetailLine('Cert ID', parsedDetails.certification_id)}
+          {action_type === 'CERTIFICATION_UPDATED' && typeof parsedDetails.image_changed === 'boolean' && 
+            renderDetailLine('Image Status', parsedDetails.image_changed ? 'Changed' : 'Unchanged')}
+        </div>
+      );
+    case 'CERTIFICATION_DELETED':
+      return (
+        <div className="mt-1 space-y-0.5">
+          {parsedDetails.deleted_title && renderDetailLine('Deleted Cert', parsedDetails.deleted_title)}
+          {parsedDetails.issuer && renderDetailLine('Issuer', parsedDetails.issuer)}
+          {parsedDetails.certification_id && renderDetailLine('Cert ID', parsedDetails.certification_id)}
+        </div>
+      );
+    case 'RESUME_META_UPDATED':
+      return (
+        <div className="mt-1 space-y-0.5">
+          {parsedDetails.pdf_changed && <div className="text-xs italic">PDF updated.</div>}
+          {parsedDetails.description_updated && <div className="text-xs italic">Description updated.</div>}
+          {(!parsedDetails.pdf_changed && !parsedDetails.description_updated) && <div className="text-xs italic">Meta data saved (no specific changes logged).</div>}
+        </div>
+      );
+    case 'RESUME_EXPERIENCE_CREATED':
+    case 'RESUME_EXPERIENCE_UPDATED':
+      return (
+        <div className="mt-1 space-y-0.5">
+          {parsedDetails.job_title && renderDetailLine('Job Title', parsedDetails.job_title)}
+          {parsedDetails.company && renderDetailLine('Company', parsedDetails.company)}
+          {parsedDetails.experience_id && renderDetailLine('Experience ID', parsedDetails.experience_id)}
+        </div>
+      );
+    case 'RESUME_EXPERIENCE_DELETED':
+      return (
+        <div className="mt-1 space-y-0.5">
+          {parsedDetails.deleted_title && renderDetailLine('Deleted Job', parsedDetails.deleted_title)}
+          {parsedDetails.deleted_id && renderDetailLine('Experience ID', parsedDetails.deleted_id)}
+        </div>
+      );
+    case 'RESUME_EDUCATION_CREATED':
+    case 'RESUME_EDUCATION_UPDATED':
+      return (
+        <div className="mt-1 space-y-0.5">
+          {parsedDetails.degree && renderDetailLine('Degree/Cert', parsedDetails.degree)}
+          {parsedDetails.education_id && renderDetailLine('Education ID', parsedDetails.education_id)}
+        </div>
+      );
+    case 'RESUME_EDUCATION_DELETED':
+      return (
+        <div className="mt-1 space-y-0.5">
+          {parsedDetails.deleted_degree && renderDetailLine('Deleted Degree/Cert', parsedDetails.deleted_degree)}
+          {parsedDetails.education_id && renderDetailLine('Education ID', parsedDetails.education_id)}
+        </div>
+      );
+    case 'RESUME_SKILL_CATEGORY_CREATED':
+    case 'RESUME_SKILL_CATEGORY_UPDATED':
+      return (
+        <div className="mt-1 space-y-0.5">
+          {parsedDetails.name && renderDetailLine('Category Name', parsedDetails.name)}
+          {parsedDetails.category_id && renderDetailLine('Category ID', parsedDetails.category_id)}
+        </div>
+      );
+    case 'RESUME_SKILL_CATEGORY_DELETED':
+      return (
+        <div className="mt-1 space-y-0.5">
+          {parsedDetails.deleted_name && renderDetailLine('Deleted Category', parsedDetails.deleted_name)}
+          {parsedDetails.deleted_id && renderDetailLine('Category ID', parsedDetails.deleted_id)}
+        </div>
+      );
+    case 'RESUME_SKILL_CREATED':
+    case 'RESUME_SKILL_UPDATED':
+      return (
+        <div className="mt-1 space-y-0.5">
+          {parsedDetails.name && renderDetailLine('Skill Name', parsedDetails.name)}
+          {parsedDetails.skill_id && renderDetailLine('Skill ID', parsedDetails.skill_id)}
+          {parsedDetails.category_id && renderDetailLine('Parent Category ID', parsedDetails.category_id)}
+        </div>
+      );
+    case 'RESUME_SKILL_DELETED':
+      return (
+        <div className="mt-1 space-y-0.5">
+          {parsedDetails.deleted_name && renderDetailLine('Deleted Skill', parsedDetails.deleted_name)}
+          {parsedDetails.deleted_id && renderDetailLine('Skill ID', parsedDetails.deleted_id)}
+          {parsedDetails.category_id && renderDetailLine('Parent Category ID', parsedDetails.category_id)}
+        </div>
+      );
+    case 'RESUME_LANGUAGE_CREATED':
+    case 'RESUME_LANGUAGE_UPDATED':
+      return (
+        <div className="mt-1 space-y-0.5">
+          {parsedDetails.name && renderDetailLine('Language', parsedDetails.name)}
+          {parsedDetails.language_id && renderDetailLine('Language ID', parsedDetails.language_id)}
+        </div>
+      );
+    case 'RESUME_LANGUAGE_DELETED':
+      return (
+        <div className="mt-1 space-y-0.5">
+          {parsedDetails.deleted_name && renderDetailLine('Deleted Language', parsedDetails.deleted_name)}
+          {parsedDetails.deleted_id && renderDetailLine('Language ID', parsedDetails.deleted_id)}
+        </div>
+      );
+    case 'CONTACT_DETAILS_UPDATED':
+      return (
+        <div className="mt-1 space-y-0.5">
+          {parsedDetails.updated_fields && Array.isArray(parsedDetails.updated_fields) && parsedDetails.updated_fields.length > 0 &&
+            renderDetailLine('Updated Fields', parsedDetails.updated_fields.join(', '))}
+          {(!parsedDetails.updated_fields || parsedDetails.updated_fields.length === 0) &&
+            <div className="text-xs italic">No specific fields detailed for update.</div>}
+        </div>
+      );
+    case 'SOCIAL_LINK_CREATED':
+    case 'SOCIAL_LINK_UPDATED':
+      return (
+        <div className="mt-1 space-y-0.5">
+          {parsedDetails.label && renderDetailLine('Link Label', parsedDetails.label)}
+          {parsedDetails.link_id && renderDetailLine('Link ID', parsedDetails.link_id)}
+        </div>
+      );
+    case 'SOCIAL_LINK_DELETED':
+      return (
+        <div className="mt-1 space-y-0.5">
+          {parsedDetails.deleted_label && renderDetailLine('Deleted Label', parsedDetails.deleted_label)}
+          {parsedDetails.deleted_id && renderDetailLine('Link ID', parsedDetails.deleted_id)}
+        </div>
+      );
+    case 'SUBMISSION_STATUS_UPDATED':
+      return (
+        <div className="mt-1 space-y-0.5">
+          {parsedDetails.submission_id && renderDetailLine('Submission ID', parsedDetails.submission_id.substring(0,8) + '...')}
+          {parsedDetails.new_status && renderDetailLine('New Status', parsedDetails.new_status)}
+        </div>
+      );
+    case 'SUBMISSION_STAR_TOGGLED':
+      return (
+        <div className="mt-1 space-y-0.5">
+          {parsedDetails.submission_id && renderDetailLine('Submission ID', parsedDetails.submission_id.substring(0,8) + '...')}
+          {typeof parsedDetails.new_star_state === 'boolean' && renderDetailLine('Starred', parsedDetails.new_star_state ? 'Yes' : 'No')}
+        </div>
+      );
+    case 'SUBMISSION_DELETED':
+      return (
+        <div className="mt-1 space-y-0.5">
+          {parsedDetails.deleted_from_email && renderDetailLine('From Email', parsedDetails.deleted_from_email)}
+          {parsedDetails.deleted_id && renderDetailLine('Submission ID', parsedDetails.deleted_id.substring(0,8) + '...')}
+        </div>
+      );
+    case 'SUBMISSION_REPLY_SENT':
+      return (
+        <div className="mt-1 space-y-0.5">
+          {parsedDetails.recipient_email && renderDetailLine('To Email', parsedDetails.recipient_email)}
+          {parsedDetails.submission_id && renderDetailLine('Submission ID', parsedDetails.submission_id.substring(0,8) + '...')}
+        </div>
+      );
+    case 'LEGAL_DOC_UPDATED':
+      return (
+        <div className="mt-1 space-y-0.5">
+          {parsedDetails.title && renderDetailLine('Document Title', parsedDetails.title)}
+          {parsedDetails.documentId && renderDetailLine('Document ID', parsedDetails.documentId)}
+        </div>
+      );
+    // Cases for Data Deletion
+    case 'DATA_DELETION_SUCCESS':
+    case 'DATA_DELETION_PARTIAL_FAILURE':
+    case 'DATA_DELETION_ATTEMPT_DISABLED':
+      if (details && typeof details === 'object') {
+        const requestedKeys = (details.requested_section_keys || details.attempted_sections_keys || []) as string[];
+        const operationResults = (details.operation_results || []) as Array<{
+          sectionKey: string;
+          success: boolean;
+          message: string;
+          details: string[];
+        }>;
+        
+        const getLabel = (key: string) => {
+            // Simplified mapping, assuming keys match labels or can be derived
+            // In a real app, you might have a shared config or pass labels in details
+            return key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+        };
+
+        let title = "Data Deletion Processed";
+        if (action_type === 'DATA_DELETION_ATTEMPT_DISABLED') title = "Data Deletion Attempt (Feature Disabled)";
+        else if (action_type === 'DATA_DELETION_PARTIAL_FAILURE') title = "Data Deletion Partially Failed";
+
+        return (
+          <>
+            <p className="font-medium">{title}:</p>
+            {requestedKeys.length > 0 && (
+              <p>Requested Sections: {requestedKeys.map(getLabel).join(', ')}</p>
+            )}
+            {operationResults.length > 0 && (
+              <div className="mt-2 space-y-1">
+                <p className="font-normal text-sm">Operation Breakdown:</p>
+                {operationResults.map((op, index) => (
+                  <div key={index} className="pl-2 border-l-2 ml-1 py-1 text-xs 
+                    {op.success ? 'border-green-500' : 'border-red-500'}">
+                    <p className="font-semibold">Section: {getLabel(op.sectionKey)} - {op.success ? 'Succeeded' : 'Failed'}</p>
+                    <p className="italic text-muted-foreground">{op.message}</p>
+                    {op.details && op.details.length > 0 && (
+                      <ul className="list-disc list-inside pl-2 mt-0.5">
+                        {op.details.map((d, i) => <li key={i}>{d}</li>)}
+                      </ul>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+            {action_type === 'DATA_DELETION_ATTEMPT_DISABLED' && !operationResults.length && (
+                 <p className="italic text-xs">No operations were performed as the feature is disabled.</p>
+            )}
+          </>
+        );
+      }
+      return <p className="text-xs italic">Details for data deletion are unavailable or not in expected format.</p>;
+    // Add more cases here for other action_types as needed
+    default:
+      // Fallback for unhandled action_types, but still try to display known fields nicely
+      const genericDetails = Object.entries(parsedDetails).map(([key, value]) => {
+        if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+          return renderDetailLine(key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()), value);
+        }
+        return null;
+      }).filter(Boolean);
+      if (genericDetails.length > 0) {
+        return <div className="mt-1 space-y-0.5">{genericDetails}</div>;
+      }
+      // Final fallback to raw JSON if no specific fields could be displayed nicely
+      return <pre className="mt-1 text-xs bg-muted p-1.5 rounded-md overflow-x-auto">{JSON.stringify(parsedDetails, null, 2)}</pre>;
+  }
+};
+
 export interface AdminNavItem {
   key: string;
   label: string;
@@ -251,10 +629,17 @@ export default function AdminPageLayout({
   const [confirmNewEmailInput, setConfirmNewEmailInput] = useState('');
   const [emailChangeError, setEmailChangeError] = useState('');
   const [isChangingEmail, setIsChangingEmail] = useState(false);
-  const [newPassword, setNewPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
+  const [currentPasswordForEmailChange, setCurrentPasswordForEmailChange] = useState('');
+  const [newPasswordInput, setNewPasswordInput] = useState('');
+  const [confirmNewPasswordInput, setConfirmNewPasswordInput] = useState('');
   const [passwordChangeError, setPasswordChangeError] = useState('');
   const [isChangingPassword, setIsChangingPassword] = useState(false);
+  const [currentPasswordForPasswordChange, setCurrentPasswordForPasswordChange] = useState('');
+  const [isUpdatingAccount, setIsUpdatingAccount] = useState(false);
+  const [showConfirmDeletePhoto, setShowConfirmDeletePhoto] = useState(false);
+
+  const [isUserAuthenticated, setIsUserAuthenticated] = useState(false);
+  const [adminUsername, setAdminUsername] = useState<string | null>(null);
 
   const [isQuickNotesModalOpen, setIsQuickNotesModalOpen] = useState(false);
 
@@ -286,29 +671,88 @@ export default function AdminPageLayout({
     }
   }, []);
 
+  const fetchActivities = useCallback(async () => {
+    if (!isUserAuthenticated) { 
+      setActivities([]); 
+      return;
+    }
+    setIsLoadingActivities(true);
+    const { data, error } = await supabase
+      .from('admin_activity_log')
+      .select('*')
+      .order('timestamp', { ascending: false })
+      .limit(100);
+
+    if (error) {
+      console.error('Error fetching activities:', error);
+      toast({ title: "Error", description: "Could not load recent activity.", variant: "destructive" });
+      setActivities([]);
+    } else {
+      setActivities(data as AdminActivityLog[]);
+    }
+    setIsLoadingActivities(false);
+  }, [isUserAuthenticated, toast]);
+
   useEffect(() => {
     setHeaderIsMounted(true);
-    fetchAdminProfile(); 
+    setCurrentThemeIcon(theme === 'dark' ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />);
+  }, [theme]);
+
+  useEffect(() => {
+    const handleAuthChange = (event: Event) => {
+      const customEvent = event as CustomEvent;
+      const authenticated = customEvent.detail.isAdminAuthenticated;
+      const usernameDetail = customEvent.detail.username;
+      
+      setIsUserAuthenticated(authenticated);
+      setAdminUsername(usernameDetail || (authenticated ? 'Admin' : null));
+
+      if (authenticated) {
+        fetchAdminProfile(); 
+        fetchActivities(); 
+      } else {
+        setActivities([]);
+        setProfilePhotoUrl(null);
+        setCurrentDbProfilePhotoUrl(null);
+        setProfilePhotoPreview(null);
+      }
+    };
+    window.addEventListener('authChange', handleAuthChange);
+
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      const user = session?.user;
+      if (user) {
+        setIsUserAuthenticated(true);
+        setAdminUsername(user.email || 'Admin');
+        fetchAdminProfile(); 
+        fetchActivities();
+      } else {
+        setIsUserAuthenticated(false);
+        setAdminUsername(null);
+        setActivities([]);
+        setProfilePhotoUrl(null);
+        setCurrentDbProfilePhotoUrl(null);
+        setProfilePhotoPreview(null);
+      }
+    });
     
     const savedSidebarState = localStorage.getItem('sidebarCollapsed');
     if (savedSidebarState) {
       setIsSidebarCollapsed(JSON.parse(savedSidebarState));
     }
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event === 'USER_UPDATED' || event === 'SIGNED_IN') { 
+    const { data: { subscription: userListenerSubscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'USER_UPDATED' && session?.user) {
+        setAdminUsername(session.user.email || 'Admin');
         fetchAdminProfile();
-        if (session?.user?.email && username !== session.user.email) {
-           window.dispatchEvent(new CustomEvent('authChange', { detail: { isAdminAuthenticated: true, username: session.user.email } }));
-        }
-      } else if (event === 'SIGNED_OUT') {
-        setProfilePhotoUrl(null);
-        setCurrentDbProfilePhotoUrl(null);
-        setProfilePhotoPreview(null);
       }
     });
-    return () => subscription?.unsubscribe();
-  }, [fetchAdminProfile, username]);
+
+    return () => {
+      window.removeEventListener('authChange', handleAuthChange);
+      userListenerSubscription?.unsubscribe();
+    };
+  }, [fetchAdminProfile, fetchActivities]);
 
   useEffect(() => {
     if (headerIsMounted) {
@@ -340,28 +784,17 @@ export default function AdminPageLayout({
     setTheme(newThemeToSet);
   };
 
-  const fetchActivities = async () => {
-    setIsLoadingActivities(true);
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) { 
-        setActivities([]);
-        setIsLoadingActivities(false); 
-        return; 
-    }
-    const { data, error } = await supabase
-      .from('admin_activity_log')
-      .select('*')
-      .order('timestamp', { ascending: false })
-      .limit(50);
-    if (error) {
-      console.error("Error fetching admin activities:", error);
-      toast({ title: "Error", description: "Could not fetch recent activities.", variant: "destructive" });
-      setActivities([]);
-    } else {
-      setActivities(data || []);
-    }
-    setIsLoadingActivities(false);
-  };
+  useEffect(() => {
+    const handleAdminActivityAdded = () => {
+      console.log("[AdminPageLayout] Received adminActivityAdded event. Refetching activities.");
+      fetchActivities();
+    };
+    window.addEventListener('adminActivityAdded', handleAdminActivityAdded);
+
+    return () => {
+      window.removeEventListener('adminActivityAdded', handleAdminActivityAdded);
+    };
+  }, [fetchActivities]);
 
   useEffect(() => {
     if (isActivitySheetOpen) fetchActivities();
@@ -374,7 +807,6 @@ export default function AdminPageLayout({
         toast({ title: "Authentication Error", description: "You must be logged in to clear logs.", variant: "destructive" });
         setIsLoadingActivities(false); return;
     }
-    // Using .neq to delete all rows; adjust if your 'id' can be '000...'
     const { error } = await supabase.from('admin_activity_log').delete().neq('id', '00000000-0000-0000-0000-000000000000'); 
     if (error) {
       console.error("Error clearing activity log:", error);
@@ -645,11 +1077,11 @@ export default function AdminPageLayout({
 
   const handleChangePassword = async () => {
     setPasswordChangeError('');
-    if (newPassword.length < 6) {
+    if (newPasswordInput.length < 6) {
       setPasswordChangeError("New password must be at least 6 characters long.");
       return;
     }
-    if (newPassword !== confirmPassword) {
+    if (newPasswordInput !== confirmNewPasswordInput) {
       setPasswordChangeError("New passwords do not match.");
       return;
     }
@@ -659,13 +1091,13 @@ export default function AdminPageLayout({
         toast({ title: "Auth Error", description: "Please log in again to change password.", variant: "destructive"});
         setIsChangingPassword(false); return;
     }
-    const { error } = await supabase.auth.updateUser({ password: newPassword });
+    const { error } = await supabase.auth.updateUser({ password: newPasswordInput });
     if (error) {
       setPasswordChangeError(`Failed to change password: ${error.message}`);
       toast({ title: "Password Change Failed", description: error.message, variant: "destructive" });
     } else {
       toast({ title: "Success", description: "Password changed successfully. You may need to log in again." });
-      setNewPassword(''); setConfirmPassword('');
+      setNewPasswordInput(''); setConfirmNewPasswordInput('');
       try {
         await supabase.from('admin_activity_log').insert({ 
             action_type: 'ADMIN_PASSWORD_CHANGED', 
@@ -690,8 +1122,8 @@ export default function AdminPageLayout({
     setNewEmailInput('');
     setConfirmNewEmailInput('');
     setEmailChangeError('');
-    setNewPassword('');
-    setConfirmPassword('');
+    setNewPasswordInput('');
+    setConfirmNewPasswordInput('');
     setPasswordChangeError('');
     setIsAccountSettingsModalOpen(true);
   };
@@ -766,7 +1198,7 @@ export default function AdminPageLayout({
                             {' by '}
                             <span className="font-medium">{(activity.user_identifier && activity.user_identifier.includes('@')) ? activity.user_identifier.split('@')[0] : (activity.user_identifier || 'System')}</span>
                           </p>
-                          {activity.details && (<pre className="mt-1 text-xs bg-muted p-2 rounded-md overflow-x-auto">{JSON.stringify(activity.details, null, 2)}</pre>)}
+                          {formatActivityDetails(activity.action_type, activity.details)}
                         </li>
                       ))}
                     </ul>
@@ -919,14 +1351,14 @@ export default function AdminPageLayout({
               <CardContent className="space-y-4">
                 <div className="space-y-2">
                     <Label htmlFor="newPassword">New Password</Label>
-                    <Input id="newPassword" type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="Enter new password (min. 6 characters)" className={passwordChangeError ? "border-destructive" : ""} />
+                    <Input id="newPassword" type="password" value={newPasswordInput} onChange={(e) => setNewPasswordInput(e.target.value)} placeholder="Enter new password (min. 6 characters)" className={passwordChangeError ? "border-destructive" : ""} />
                 </div>
                 <div className="space-y-2">
                     <Label htmlFor="confirmPassword">Confirm New Password</Label>
-                    <Input id="confirmPassword" type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} placeholder="Confirm new password" className={passwordChangeError ? "border-destructive" : ""} />
+                    <Input id="confirmPassword" type="password" value={confirmNewPasswordInput} onChange={(e) => setConfirmNewPasswordInput(e.target.value)} placeholder="Confirm new password" className={passwordChangeError ? "border-destructive" : ""} />
                 </div>
                 {passwordChangeError && <p className="text-sm text-destructive">{passwordChangeError}</p>}
-                <Button type="button" onClick={handleChangePassword} disabled={isChangingPassword || !newPassword || !confirmPassword} className="w-full sm:w-auto">
+                <Button type="button" onClick={handleChangePassword} disabled={isChangingPassword || !newPasswordInput || !confirmNewPasswordInput} className="w-full sm:w-auto">
                     {isChangingPassword ? <KeyRound className="mr-2 h-4 w-4 animate-spin"/> : <KeyRound className="mr-2 h-4 w-4"/>}
                     Change Password
                 </Button>

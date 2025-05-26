@@ -8,7 +8,7 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { UploadCloud, PlusCircle, Edit, Trash2, Award as CertificateIcon, Loader2 } from 'lucide-react';
 import { supabase } from '@/lib/supabaseClient';
-import type { Certification } from '@/types/supabase';
+import type { Certification, User as SupabaseUser } from '@/types/supabase';
 import Image from 'next/image';
 import {
   Dialog,
@@ -57,6 +57,7 @@ export default function CertificationsManager() {
   const [currentDbCertificationImageUrl, setCurrentDbCertificationImageUrl] = useState<string | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [certificationToDelete, setCertificationToDelete] = useState<Certification | null>(null);
+  const [currentUser, setCurrentUser] = useState<SupabaseUser | null>(null);
   
   const [certificationImageFile, setCertificationImageFile] = useState<File | null>(null);
   const [certificationImagePreview, setCertificationImagePreview] = useState<string | null>(null);
@@ -70,6 +71,17 @@ export default function CertificationsManager() {
 
   useEffect(() => {
     fetchCertifications();
+    const authListener = supabase.auth.onAuthStateChange(
+      async (_event, session) => {
+        setCurrentUser(session?.user ?? null);
+      }
+    );
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setCurrentUser(session?.user ?? null);
+    });
+    return () => {
+      authListener.data.subscription?.unsubscribe();
+    };
   }, []);
 
   useEffect(() => {
@@ -226,12 +238,33 @@ export default function CertificationsManager() {
       const { error: updateError } = await supabase
         .from('certifications')
         .update(dataForSupabase)
-        .eq('id', formData.id);
+        .eq('id', formData.id)
+        .select()
+        .single(); // to get the updated record for logging
+
       if (updateError) {
         console.error("Error updating certification:", JSON.stringify(updateError, null, 2));
         toast({ title: "Error", description: `Failed to update certification: ${updateError.message}`, variant: "destructive" });
       } else {
         toast({ title: "Success", description: "Certification updated successfully." });
+        if (currentUser && formData.id) {
+          try {
+            await supabase.from('admin_activity_log').insert({
+              action_type: 'CERTIFICATION_UPDATED',
+              description: `Admin updated certification: ${formData.title}`,
+              user_identifier: currentUser.id,
+              details: { 
+                certification_id: formData.id, 
+                title: formData.title, 
+                issuer: formData.issuer,
+                image_changed: imageUrlToSaveInDb !== currentDbCertificationImageUrl 
+              }
+            });
+            window.dispatchEvent(new CustomEvent('adminActivityAdded'));
+          } catch (logError) {
+            console.error("Error logging certification update:", logError);
+          }
+        }
         // Delete old image from storage if a new one was uploaded OR if the URL was cleared
         if (oldImageStoragePathToDelete && imageUrlToSaveInDb !== currentDbCertificationImageUrl) {
             console.log("[CertManager] Attempting to delete old cert image from storage:", oldImageStoragePathToDelete);
@@ -243,21 +276,36 @@ export default function CertificationsManager() {
                 console.log("[CertManager] Old certificate image deleted from storage.");
             }
         }
-        await supabase.from('admin_activity_log').insert({ action_type: 'CERTIFICATION_UPDATED', description: `Certification "${formData.title}" updated.`, user_identifier: (await supabase.auth.getUser()).data.user?.email });
       }
     } else { // Add new
-      // Supabase generates ID, so just use dataForSupabase directly
-      const { data: newCert, error: insertError } = await supabase
+      const { data: newCertification, error: insertError } = await supabase
         .from('certifications')
         .insert(dataForSupabase)
         .select()
         .single();
+
       if (insertError) {
         console.error("Error adding certification:", JSON.stringify(insertError, null, 2));
         toast({ title: "Error", description: `Failed to add certification: ${insertError.message}`, variant: "destructive" });
-      } else {
+      } else if (newCertification) {
         toast({ title: "Success", description: "Certification added successfully." });
-        if (newCert) await supabase.from('admin_activity_log').insert({ action_type: 'CERTIFICATION_CREATED', description: `Certification "${newCert.title}" created.`, user_identifier: (await supabase.auth.getUser()).data.user?.email, details: { certificationId: newCert.id } });
+        if (currentUser) {
+          try {
+            await supabase.from('admin_activity_log').insert({
+              action_type: 'CERTIFICATION_CREATED',
+              description: `Admin created certification: ${newCertification.title}`,
+              user_identifier: currentUser.id,
+              details: { 
+                certification_id: newCertification.id, 
+                title: newCertification.title, 
+                issuer: newCertification.issuer 
+              }
+            });
+            window.dispatchEvent(new CustomEvent('adminActivityAdded'));
+          } catch (logError) {
+            console.error("Error logging certification creation:", logError);
+          }
+        }
       }
     }
     fetchCertifications();
@@ -269,50 +317,67 @@ export default function CertificationsManager() {
   };
   
   const handleDeleteCertification = async () => {
-    if (!certificationToDelete) return;
-    setIsSubmitting(true);
+    if (!certificationToDelete || !currentUser) return;
     
-    // Attempt to delete the image from storage first
-    if (certificationToDelete.imageUrl) {
-        let imagePathToDelete: string | null = null;
-        try {
-            const url = new URL(certificationToDelete.imageUrl);
-            const pathParts = url.pathname.split('/certification-images/');
-            if (pathParts.length > 1 && !pathParts[1].startsWith('http')) {
-                imagePathToDelete = decodeURIComponent(pathParts[1]);
-            }
-        } catch (e) {
-            console.warn("[CertManager] Could not parse imageUrl for deletion from storage:", certificationToDelete.imageUrl);
-        }
+    // Store details for logging before deletion
+    const { id: deletedId, title: deletedTitle, issuer: deletedIssuer, image_url: deletedImageUrl } = certificationToDelete;
 
-        if (imagePathToDelete) {
-            const { error: storageError } = await supabase.storage.from('certification-images').remove([imagePathToDelete]);
-            if (storageError) {
-                console.warn("[CertManager] Error deleting cert image from storage during full delete, proceeding with DB delete:", JSON.stringify(storageError, null, 2));
-                toast({ title: "Storage Warning", description: `Could not delete image from storage: ${storageError.message}. DB record will still be deleted.`, variant: "default", duration: 6000});
-            } else {
-                 console.log("[CertManager] Certificate image deleted from storage:", imagePathToDelete);
-            }
-        }
-    }
-    
-    const { error: deleteError } = await supabase
+    // First, delete the record from the database
+    const { error: dbDeleteError } = await supabase
       .from('certifications')
       .delete()
-      .eq('id', certificationToDelete.id);
+      .eq('id', deletedId);
 
-    if (deleteError) {
-      console.error("Error deleting certification:", JSON.stringify(deleteError, null, 2));
-      toast({ title: "Error", description: `Failed to delete certification: ${deleteError.message}`, variant: "destructive" });
+    if (dbDeleteError) {
+      console.error("Error deleting certification from DB:", JSON.stringify(dbDeleteError, null, 2));
+      toast({ title: "Error", description: `Failed to delete certification: ${dbDeleteError.message}`, variant: "destructive" });
     } else {
       toast({ title: "Success", description: "Certification deleted successfully." });
-      await supabase.from('admin_activity_log').insert({ action_type: 'CERTIFICATION_DELETED', description: `Certification "${certificationToDelete.title}" deleted.`, user_identifier: (await supabase.auth.getUser()).data.user?.email, details: { certificationId: certificationToDelete.id } });
-      fetchCertifications();
+      
+      // Log the deletion activity
+      try {
+        await supabase.from('admin_activity_log').insert({
+          action_type: 'CERTIFICATION_DELETED',
+          description: `Admin deleted certification: ${deletedTitle}`,
+          user_identifier: currentUser.id,
+          details: { 
+            certification_id: deletedId, 
+            deleted_title: deletedTitle, 
+            issuer: deletedIssuer 
+          }
+        });
+        window.dispatchEvent(new CustomEvent('adminActivityAdded'));
+      } catch (logError) {
+        console.error("Error logging certification deletion:", logError);
+      }
+
+      // If DB deletion was successful, proceed to delete the image from storage
+      if (deletedImageUrl) {
+        try {
+          const url = new URL(deletedImageUrl);
+          if (url.pathname.includes('/certification-images/')) {
+            const pathParts = url.pathname.split('/certification-images/');
+            if (pathParts.length > 1 && !pathParts[1].startsWith('http')) {
+              const storagePath = decodeURIComponent(pathParts[1]);
+              console.log("[CertManager] Attempting to delete cert image from storage after DB delete:", storagePath);
+              const { error: storageDeleteError } = await supabase.storage.from('certification-images').remove([storagePath]);
+              if (storageDeleteError) {
+                console.error("Error deleting certification image from storage:", JSON.stringify(storageDeleteError, null, 2));
+                toast({ title: "Storage Warning", description: `Certification record deleted, but failed to delete image from storage: ${storageDeleteError.message}`, variant: "default", duration: 7000 });
+              } else {
+                console.log("[CertManager] Successfully deleted cert image from storage:", storagePath);
+              }
+            }
+          }
+        } catch (e) {
+          console.warn("[CertManager] Could not parse or process image URL for deletion from storage:", deletedImageUrl, e);
+        }
+      }
+      fetchCertifications(); // Refresh list
     }
     setShowDeleteConfirm(false);
     setCertificationToDelete(null);
-    router.refresh();
-    setIsSubmitting(false);
+    router.refresh(); 
   };
 
   const triggerDeleteConfirmation = (certification: Certification) => {

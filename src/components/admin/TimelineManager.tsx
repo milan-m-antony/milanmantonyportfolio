@@ -9,7 +9,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { PlusCircle, Edit, Trash2, MapPin, HelpCircle } from 'lucide-react'; // Removed specific icons, will use HelpCircle for display list
 import { supabase } from '@/lib/supabaseClient';
-import type { TimelineEvent, TimelineEventType } from '@/types/supabase';
+import type { TimelineEvent, TimelineEventType, User as SupabaseUser } from '@/types/supabase';
 import Image from 'next/image'; // For displaying image icons
 import {
   Dialog,
@@ -71,6 +71,7 @@ export default function TimelineManager() {
   const [currentEvent, setCurrentEvent] = useState<TimelineEvent | null>(null);
   const [showEventDeleteConfirm, setShowEventDeleteConfirm] = useState(false);
   const [eventToDelete, setEventToDelete] = useState<TimelineEvent | null>(null);
+  const [currentUser, setCurrentUser] = useState<SupabaseUser | null>(null);
 
   const eventForm = useForm<TimelineEventFormData>({
     resolver: zodResolver(timelineEventSchema),
@@ -79,6 +80,17 @@ export default function TimelineManager() {
 
   useEffect(() => {
     fetchTimelineEvents();
+    const authListener = supabase.auth.onAuthStateChange(
+      async (_event, session) => {
+        setCurrentUser(session?.user ?? null);
+      }
+    );
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setCurrentUser(session?.user ?? null);
+    });
+    return () => {
+      authListener.data.subscription?.unsubscribe();
+    };
   }, []);
 
   useEffect(() => {
@@ -140,17 +152,46 @@ export default function TimelineManager() {
         toast({ title: "Error", description: `Failed to update event: ${error.message}`, variant: "destructive" });
       } else {
         toast({ title: "Success", description: "Timeline event updated successfully." });
+        if (currentUser) {
+          try {
+            await supabase.from('admin_activity_log').insert({
+              action_type: 'TIMELINE_EVENT_UPDATED',
+              description: `Admin updated timeline event: ${formData.title}`,
+              user_identifier: currentUser.id,
+              details: { event_id: formData.id, title: formData.title, type: formData.type }
+            });
+            window.dispatchEvent(new CustomEvent('adminActivityAdded'));
+          } catch (logError) {
+            console.error("Error logging timeline event update:", logError);
+          }
+        }
       }
     } else {
       const { id, ...dataToInsert } = dataToSave;
-      const { error } = await supabase
+      const { data: newEvent, error } = await supabase // Capture returned data
         .from('timeline_events')
-        .insert(dataToInsert);
+        .insert(dataToInsert)
+        .select() // Select the newly created event
+        .single(); // Expect a single record
+
       if (error) {
         console.error("Error adding timeline event:", JSON.stringify(error, null, 2));
         toast({ title: "Error", description: `Failed to add event: ${error.message}`, variant: "destructive" });
-      } else {
+      } else if (newEvent) {
         toast({ title: "Success", description: "Timeline event added successfully." });
+        if (currentUser) {
+          try {
+            await supabase.from('admin_activity_log').insert({
+              action_type: 'TIMELINE_EVENT_CREATED',
+              description: `Admin created timeline event: ${newEvent.title}`,
+              user_identifier: currentUser.id,
+              details: { event_id: newEvent.id, title: newEvent.title, type: newEvent.type }
+            });
+            window.dispatchEvent(new CustomEvent('adminActivityAdded'));
+          } catch (logError) {
+            console.error("Error logging timeline event creation:", logError);
+          }
+        }
       }
     }
     fetchTimelineEvents();
@@ -172,6 +213,19 @@ export default function TimelineManager() {
       toast({ title: "Error", description: `Failed to delete event: ${error.message}`, variant: "destructive" });
     } else {
       toast({ title: "Success", description: "Timeline event deleted successfully." });
+      if (currentUser && eventToDelete) {
+        try {
+          await supabase.from('admin_activity_log').insert({
+            action_type: 'TIMELINE_EVENT_DELETED',
+            description: `Admin deleted timeline event: ${eventToDelete.title}`,
+            user_identifier: currentUser.id,
+            details: { event_id: eventToDelete.id, deleted_title: eventToDelete.title, type: eventToDelete.type }
+          });
+          window.dispatchEvent(new CustomEvent('adminActivityAdded'));
+        } catch (logError) {
+          console.error("Error logging timeline event deletion:", logError);
+        }
+      }
       fetchTimelineEvents();
     }
     setShowEventDeleteConfirm(false);

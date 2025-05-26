@@ -10,7 +10,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter }
 import { PlusCircle, Edit, Trash2, Briefcase, GraduationCap, ListChecks, Languages as LanguagesIcon, FileText as ResumeFileIcon, UploadCloud, Link as LinkIcon, Building, Type as TypeIcon, ChevronDown } from 'lucide-react';
 import NextImage from 'next/image';
 import { supabase } from '@/lib/supabaseClient';
-import type { ResumeExperience, ResumeEducation, ResumeKeySkillCategory, ResumeKeySkill, ResumeLanguage, ResumeMeta } from '@/types/supabase';
+import type { ResumeExperience, ResumeEducation, ResumeKeySkillCategory, ResumeKeySkill, ResumeLanguage, ResumeMeta, User as SupabaseUser } from '@/types/supabase';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from "@/components/ui/dialog";
 import * as AccordionPrimitive from "@radix-ui/react-accordion";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger as ShadCNAccordionTrigger } from "@/components/ui/accordion";
@@ -94,6 +94,7 @@ const IconPreview: React.FC<{ url?: string | null; alt?: string; DefaultIcon?: R
 export default function ResumeManager() {
   const router = useRouter();
   const { toast } = useToast();
+  const [currentUser, setCurrentUser] = useState<SupabaseUser | null>(null);
 
   // Resume Meta State
   const [isLoadingResumeMeta, setIsLoadingResumeMeta] = React.useState(false);
@@ -225,6 +226,19 @@ export default function ResumeManager() {
     if (upsertError) { toast({ title: "Error", description: `Failed to save resume info: ${upsertError.message}`, variant: "destructive" }); } 
     else { 
         toast({ title: "Success", description: "Resume info saved." }); 
+        if (currentUser) {
+            try {
+                await supabase.from('admin_activity_log').insert({
+                    action_type: 'RESUME_META_UPDATED',
+                    description: `Admin updated resume metadata (description/PDF).`,
+                    user_identifier: currentUser.id,
+                    details: { pdf_changed: !!resumePdfFile || (formData.resume_pdf_url === '' && !!currentDbResumePdfUrl), description_updated: formData.description !== resumeMetaForm.getValues('description')}
+                });
+                window.dispatchEvent(new CustomEvent('adminActivityAdded'));
+            } catch (logError) {
+                console.error("[ResumeManager] Error logging resume meta update:", logError);
+            }
+        }
         fetchResumeMeta(); // Re-fetch to update currentDbResumePdfUrl
         router.refresh(); 
     }
@@ -234,8 +248,55 @@ export default function ResumeManager() {
 
   // Experience CRUD
   const fetchExperiences = async () => { setIsLoadingExperiences(true); const { data, error } = await supabase.from('resume_experience').select('*').order('sort_order', { ascending: true }); if (error) { toast({ title: "Error fetching experiences", description: error.message, variant: "destructive" }); setExperiences([]); } else { setExperiences((data || []).map(item => ({ ...item, description_points: item.description_points || [], icon_image_url: item.icon_image_url || null }))); } setIsLoadingExperiences(false); };
-  const onExperienceSubmit: SubmitHandler<ResumeExperienceFormData> = async (formData) => { const dataToSave = { ...formData, description_points: formData.description_points || [], icon_image_url: formData.icon_image_url?.trim() === '' ? null : formData.icon_image_url, sort_order: Number(formData.sort_order) || 0 }; let response; if (formData.id) { response = await supabase.from('resume_experience').update(dataToSave).eq('id', formData.id).select(); } else { const { id, ...insertData } = dataToSave; response = await supabase.from('resume_experience').insert(insertData).select(); } if (response.error) { toast({ title: "Error saving experience", description: response.error.message, variant: "destructive" }); } else { toast({ title: "Success", description: "Experience saved." }); fetchExperiences(); setIsExperienceModalOpen(false); router.refresh(); }};
-  const handleDeleteExperience = async () => { if (!experienceToDelete) return; const { error } = await supabase.from('resume_experience').delete().eq('id', experienceToDelete.id); if (error) { toast({ title: "Error deleting experience", description: error.message, variant: "destructive" }); } else { toast({ title: "Success", description: "Experience deleted." }); fetchExperiences(); router.refresh(); } setExperienceToDelete(null); setShowExperienceDeleteConfirm(false); };
+  const onExperienceSubmit: SubmitHandler<ResumeExperienceFormData> = async (formData) => {
+    const dataToSave = {
+      ...formData,
+      description_points: Array.isArray(formData.description_points) ? formData.description_points : (formData.description_points as unknown as string).split('\n').map(p => p.trim()).filter(Boolean),
+      icon_image_url: formData.icon_image_url?.trim() === '' ? null : formData.icon_image_url,
+      sort_order: Number(formData.sort_order) || 0,
+    };
+
+    let response;
+    let action_type: string = '';
+    let log_description = '';
+    let details = {};
+
+    if (formData.id) { // Update
+      response = await supabase.from('resume_experience').update(dataToSave).eq('id', formData.id).select().single();
+      action_type = 'RESUME_EXPERIENCE_UPDATED';
+      log_description = `Admin updated resume experience: ${response.data?.job_title}`;
+      details = { experience_id: response.data?.id, job_title: response.data?.job_title, company: response.data?.company_name };
+    } else { // Create
+      const { id, ...insertData } = dataToSave;
+      response = await supabase.from('resume_experience').insert(insertData).select().single();
+      action_type = 'RESUME_EXPERIENCE_CREATED';
+      log_description = `Admin created resume experience: ${response.data?.job_title}`;
+      details = { experience_id: response.data?.id, job_title: response.data?.job_title, company: response.data?.company_name };
+    }
+
+    if (response.error) {
+      toast({ title: "Error saving experience", description: response.error.message, variant: "destructive" });
+    } else {
+      toast({ title: "Success", description: "Experience item saved." });
+      if (currentUser && response.data) {
+        try {
+          await supabase.from('admin_activity_log').insert({ 
+            action_type, 
+            description: log_description, 
+            user_identifier: currentUser.id, 
+            details 
+          });
+          window.dispatchEvent(new CustomEvent('adminActivityAdded'));
+        } catch (logError) {
+          console.error(`Error logging ${action_type}:`, logError);
+        }
+      }
+      fetchExperiences();
+      setIsExperienceModalOpen(false);
+      router.refresh();
+    }
+  };
+  const handleDeleteExperience = async () => { if (!experienceToDelete) return; const { error } = await supabase.from('resume_experience').delete().eq('id', experienceToDelete.id); if (error) { toast({ title: "Error deleting experience", description: error.message, variant: "destructive" }); } else { toast({ title: "Success", description: "Experience deleted." }); if (currentUser && experienceToDelete) { try { await supabase.from('admin_activity_log').insert({ action_type: 'RESUME_EXPERIENCE_DELETED', description: `Admin deleted resume experience: ${experienceToDelete.job_title}`, user_identifier: currentUser.id, details: { deleted_id: experienceToDelete.id, deleted_title: experienceToDelete.job_title } }); window.dispatchEvent(new CustomEvent('adminActivityAdded')); } catch (logError) { console.error("Error logging experience deletion:", logError); }} fetchExperiences(); router.refresh(); } setExperienceToDelete(null); setShowExperienceDeleteConfirm(false); };
   const triggerExperienceDeleteConfirmation = (experience: ResumeExperience) => { setExperienceToDelete(experience); setShowExperienceDeleteConfirm(true); };
   const handleOpenExperienceModal = (experience?: ResumeExperience) => {
     setCurrentExperience(experience || null);
@@ -265,31 +326,48 @@ export default function ResumeManager() {
 
   // Education CRUD
   const fetchEducationItems = async () => { setIsLoadingEducation(true); const { data, error } = await supabase.from('resume_education').select('*').order('sort_order', { ascending: true }); if (error) { toast({ title: "Error fetching education", description: error.message, variant: "destructive" }); setEducationItems([]); } else { setEducationItems((data || []).map(item => ({ ...item, icon_image_url: item.icon_image_url || null }))); } setIsLoadingEducation(false); };
-  const onEducationSubmit: SubmitHandler<ResumeEducationFormData> = async (formData) => { const dataToSave = { ...formData, icon_image_url: formData.icon_image_url?.trim() === '' ? null : formData.icon_image_url, sort_order: Number(formData.sort_order) || 0 }; let response; if (formData.id) { response = await supabase.from('resume_education').update(dataToSave).eq('id', formData.id).select(); } else { const { id, ...insertData } = dataToSave; response = await supabase.from('resume_education').insert(insertData).select(); } if (response.error) { toast({ title: "Error saving education", description: response.error.message, variant: "destructive" }); } else { toast({ title: "Success", description: "Education item saved." }); fetchEducationItems(); setIsEducationModalOpen(false); router.refresh(); }};
-  const handleDeleteEducation = async () => { if (!educationToDelete) return; const { error } = await supabase.from('resume_education').delete().eq('id', educationToDelete.id); if (error) { toast({ title: "Error deleting education", description: error.message, variant: "destructive" }); } else { toast({ title: "Success", description: "Education item deleted." }); fetchEducationItems(); router.refresh(); } setEducationToDelete(null); setShowEducationDeleteConfirm(false); };
+  const onEducationSubmit: SubmitHandler<ResumeEducationFormData> = async (formData) => { const dataToSave = { ...formData, icon_image_url: formData.icon_image_url?.trim() === '' ? null : formData.icon_image_url, sort_order: Number(formData.sort_order) || 0 }; let response; let action_type: string = ''; let log_description = ''; let details = {}; if (formData.id) { response = await supabase.from('resume_education').update(dataToSave).eq('id', formData.id).select().single(); action_type = 'RESUME_EDUCATION_UPDATED'; log_description = `Admin updated resume education: ${response.data?.degree_or_certification}`; details = { education_id: response.data?.id, degree: response.data?.degree_or_certification };} else { const { id, ...insertData } = dataToSave; response = await supabase.from('resume_education').insert(insertData).select().single(); action_type = 'RESUME_EDUCATION_CREATED'; log_description = `Admin created resume education: ${response.data?.degree_or_certification}`; details = { education_id: response.data?.id, degree: response.data?.degree_or_certification };} if (response.error) { toast({ title: "Error saving education", description: response.error.message, variant: "destructive" }); } else { toast({ title: "Success", description: "Education item saved." }); if (currentUser && response.data) { try { await supabase.from('admin_activity_log').insert({ action_type, description: log_description, user_identifier: currentUser.id, details }); window.dispatchEvent(new CustomEvent('adminActivityAdded')); } catch (logError) { console.error(`Error logging ${action_type}:`, logError); }} fetchEducationItems(); setIsEducationModalOpen(false); router.refresh(); }};
+  const handleDeleteEducation = async () => { if (!educationToDelete) return; const { error } = await supabase.from('resume_education').delete().eq('id', educationToDelete.id); if (error) { toast({ title: "Error deleting education", description: error.message, variant: "destructive" }); } else { toast({ title: "Success", description: "Education item deleted." }); if (currentUser && educationToDelete) { try { await supabase.from('admin_activity_log').insert({ action_type: 'RESUME_EDUCATION_DELETED', description: `Admin deleted resume education: ${educationToDelete.degree_or_certification}`, user_identifier: currentUser.id, details: { deleted_id: educationToDelete.id, deleted_degree: educationToDelete.degree_or_certification } }); window.dispatchEvent(new CustomEvent('adminActivityAdded')); } catch (logError) { console.error("Error logging education deletion:", logError); }} fetchEducationItems(); router.refresh(); } setEducationToDelete(null); setShowEducationDeleteConfirm(false); };
   const triggerEducationDeleteConfirmation = (education: ResumeEducation) => { setEducationToDelete(education); setShowEducationDeleteConfirm(true); };
   const handleOpenEducationModal = (education?: ResumeEducation) => { setCurrentEducation(education || null); educationForm.reset(education ? {...education, icon_image_url: education.icon_image_url || '', sort_order: Number(education.sort_order ?? 0)} : { degree_or_certification: '', institution_name: '', date_range: '', description: '', icon_image_url: '', sort_order: 0 }); setIsEducationModalOpen(true); };
 
   // Key Skill Category & Skill CRUD
   const fetchKeySkillCategoriesAndSkills = async () => { setIsLoadingKeySkillCategories(true); const { data, error } = await supabase.from('resume_key_skill_categories').select(`*, resume_key_skills(*)`).order('sort_order', { ascending: true }).order('skill_name', { foreignTable: 'resume_key_skills', ascending: true }); if (error) { toast({ title: "Error fetching key skills", description: error.message, variant: "destructive" }); setKeySkillCategories([]); } else { setKeySkillCategories((data || []).map(cat => ({ ...cat, skills: cat.resume_key_skills || [], icon_image_url: cat.icon_image_url || null }))); } setIsLoadingKeySkillCategories(false); };
-  const onSkillCategorySubmit: SubmitHandler<ResumeKeySkillCategoryFormData> = async (formData) => { const dataToSave = { ...formData, icon_image_url: formData.icon_image_url?.trim() === '' ? null : formData.icon_image_url, sort_order: Number(formData.sort_order) || 0 }; let response; if (formData.id) { response = await supabase.from('resume_key_skill_categories').update(dataToSave).eq('id', formData.id).select(); } else { const { id, ...insertData } = dataToSave; response = await supabase.from('resume_key_skill_categories').insert(insertData).select(); } if (response.error) { toast({ title: "Error saving category", description: response.error.message, variant: "destructive" }); } else { toast({ title: "Success", description: "Skill category saved." }); fetchKeySkillCategoriesAndSkills(); setIsSkillCategoryModalOpen(false); router.refresh(); }};
-  const handleDeleteSkillCategory = async () => { if (!skillCategoryToDelete) return; const { error } = await supabase.from('resume_key_skill_categories').delete().eq('id', skillCategoryToDelete.id); if (error) { toast({ title: "Error deleting category", description: error.message, variant: "destructive" }); } else { toast({ title: "Success", description: "Skill category deleted (skills within it also deleted by cascade)." }); fetchKeySkillCategoriesAndSkills(); router.refresh(); } setSkillCategoryToDelete(null); setShowSkillCategoryDeleteConfirm(false); };
+  const onSkillCategorySubmit: SubmitHandler<ResumeKeySkillCategoryFormData> = async (formData) => { const dataToSave = { ...formData, icon_image_url: formData.icon_image_url?.trim() === '' ? null : formData.icon_image_url, sort_order: Number(formData.sort_order) || 0 }; let response; let action_type: string = ''; let log_description = ''; let details = {}; if (formData.id) { response = await supabase.from('resume_key_skill_categories').update(dataToSave).eq('id', formData.id).select().single(); action_type = 'RESUME_SKILL_CATEGORY_UPDATED'; log_description = `Admin updated skill category: ${response.data?.category_name}`; details = { category_id: response.data?.id, name: response.data?.category_name }; } else { const { id, ...insertData } = dataToSave; response = await supabase.from('resume_key_skill_categories').insert(insertData).select().single(); action_type = 'RESUME_SKILL_CATEGORY_CREATED'; log_description = `Admin created skill category: ${response.data?.category_name}`; details = { category_id: response.data?.id, name: response.data?.category_name };} if (response.error) { toast({ title: "Error saving category", description: response.error.message, variant: "destructive" }); } else { toast({ title: "Success", description: "Skill category saved." }); if (currentUser && response.data) { try { await supabase.from('admin_activity_log').insert({ action_type, description: log_description, user_identifier: currentUser.id, details }); window.dispatchEvent(new CustomEvent('adminActivityAdded')); } catch (logError) { console.error(`Error logging ${action_type}:`, logError); }} fetchKeySkillCategoriesAndSkills(); setIsSkillCategoryModalOpen(false); router.refresh(); }};
+  const handleDeleteSkillCategory = async () => { if (!skillCategoryToDelete) return; const { error } = await supabase.from('resume_key_skill_categories').delete().eq('id', skillCategoryToDelete.id); if (error) { toast({ title: "Error deleting category", description: error.message, variant: "destructive" }); } else { toast({ title: "Success", description: "Skill category deleted (skills within it also deleted by cascade)." }); if (currentUser && skillCategoryToDelete) { try { await supabase.from('admin_activity_log').insert({ action_type: 'RESUME_SKILL_CATEGORY_DELETED', description: `Admin deleted skill category: ${skillCategoryToDelete.category_name}`, user_identifier: currentUser.id, details: { deleted_id: skillCategoryToDelete.id, deleted_name: skillCategoryToDelete.category_name } }); window.dispatchEvent(new CustomEvent('adminActivityAdded')); } catch (logError) { console.error("Error logging skill category deletion:", logError); }} fetchKeySkillCategoriesAndSkills(); router.refresh(); } setSkillCategoryToDelete(null); setShowSkillCategoryDeleteConfirm(false); };
   const triggerSkillCategoryDeleteConfirmation = (category: ResumeKeySkillCategory) => { setSkillCategoryToDelete(category); setShowSkillCategoryDeleteConfirm(true); };
   const handleOpenSkillCategoryModal = (category?: ResumeKeySkillCategory) => { setCurrentSkillCategory(category || null); skillCategoryForm.reset(category ? { ...category, icon_image_url: category.icon_image_url || '', sort_order: Number(category.sort_order ?? 0) } : { category_name: '', icon_image_url: '', sort_order: 0 }); setIsSkillCategoryModalOpen(true); };
-  const onSkillSubmit: SubmitHandler<ResumeKeySkillFormData> = async (formData) => { const dataToSave = { ...formData }; let response; if (formData.id) { response = await supabase.from('resume_key_skills').update(dataToSave).eq('id', formData.id).select(); } else { const { id, ...insertData } = dataToSave; response = await supabase.from('resume_key_skills').insert(insertData).select(); } if (response.error) { toast({ title: "Error saving skill", description: response.error.message, variant: "destructive" }); } else { toast({ title: "Success", description: "Skill saved." }); fetchKeySkillCategoriesAndSkills(); setIsSkillModalOpen(false); router.refresh(); }};
-  const handleDeleteSkill = async () => { if (!skillToDelete) return; const { error } = await supabase.from('resume_key_skills').delete().eq('id', skillToDelete.id); if (error) { toast({ title: "Error deleting skill", description: error.message, variant: "destructive" }); } else { toast({ title: "Success", description: "Skill deleted." }); fetchKeySkillCategoriesAndSkills(); router.refresh(); } setSkillToDelete(null); setShowSkillDeleteConfirm(false); };
+  const onSkillSubmit: SubmitHandler<ResumeKeySkillFormData> = async (formData) => { const dataToSave = { ...formData }; let response; let action_type: string = ''; let log_description = ''; let details = {}; if (formData.id) { response = await supabase.from('resume_key_skills').update(dataToSave).eq('id', formData.id).select().single(); action_type = 'RESUME_SKILL_UPDATED'; log_description = `Admin updated skill: ${response.data?.skill_name}`; details = { skill_id: response.data?.id, name: response.data?.skill_name, category_id: response.data?.category_id };} else { const { id, ...insertData } = dataToSave; response = await supabase.from('resume_key_skills').insert(insertData).select().single(); action_type = 'RESUME_SKILL_CREATED'; log_description = `Admin created skill: ${response.data?.skill_name}`; details = { skill_id: response.data?.id, name: response.data?.skill_name, category_id: response.data?.category_id };} if (response.error) { toast({ title: "Error saving skill", description: response.error.message, variant: "destructive" }); } else { toast({ title: "Success", description: "Skill saved." }); if (currentUser && response.data) { try { await supabase.from('admin_activity_log').insert({ action_type, description: log_description, user_identifier: currentUser.id, details }); window.dispatchEvent(new CustomEvent('adminActivityAdded')); } catch (logError) { console.error(`Error logging ${action_type}:`, logError); }} fetchKeySkillCategoriesAndSkills(); setIsSkillModalOpen(false); router.refresh(); }};
+  const handleDeleteSkill = async () => { if (!skillToDelete) return; const { error } = await supabase.from('resume_key_skills').delete().eq('id', skillToDelete.id); if (error) { toast({ title: "Error deleting skill", description: error.message, variant: "destructive" }); } else { toast({ title: "Success", description: "Skill deleted." }); if (currentUser && skillToDelete) { try { await supabase.from('admin_activity_log').insert({ action_type: 'RESUME_SKILL_DELETED', description: `Admin deleted skill: ${skillToDelete.skill_name}`, user_identifier: currentUser.id, details: { deleted_id: skillToDelete.id, deleted_name: skillToDelete.skill_name, category_id: skillToDelete.category_id } }); window.dispatchEvent(new CustomEvent('adminActivityAdded')); } catch (logError) { console.error("Error logging skill deletion:", logError); }} fetchKeySkillCategoriesAndSkills(); router.refresh(); } setSkillToDelete(null); setShowSkillDeleteConfirm(false); };
   const triggerSkillDeleteConfirmation = (skill: ResumeKeySkill) => { setSkillToDelete(skill); setShowSkillDeleteConfirm(true); };
   const handleOpenSkillModal = (categoryId: string, skill?: ResumeKeySkill) => { setParentKeySkillCategoryId(categoryId); setCurrentSkill(skill || null); skillForm.reset(skill ? { ...skill, category_id: categoryId } : { skill_name: '', category_id: categoryId }); setIsSkillModalOpen(true); };
 
   // Language CRUD
   const fetchLanguages = async () => { setIsLoadingLanguages(true); const { data, error } = await supabase.from('resume_languages').select('*').order('sort_order', { ascending: true }); if (error) { toast({ title: "Error fetching languages", description: error.message, variant: "destructive" }); setLanguages([]); } else { setLanguages((data || []).map(item => ({ ...item, icon_image_url: item.icon_image_url || null }))); } setIsLoadingLanguages(false); };
-  const onLanguageSubmit: SubmitHandler<ResumeLanguageFormData> = async (formData) => { const dataToSave = { ...formData, icon_image_url: formData.icon_image_url?.trim() === '' ? null : formData.icon_image_url, sort_order: Number(formData.sort_order) || 0 }; let response; if (formData.id) { response = await supabase.from('resume_languages').update(dataToSave).eq('id', formData.id).select(); } else { const { id, ...insertData } = dataToSave; response = await supabase.from('resume_languages').insert(insertData).select(); } if (response.error) { toast({ title: "Error saving language", description: response.error.message, variant: "destructive" }); } else { toast({ title: "Success", description: "Language saved." }); fetchLanguages(); setIsLanguageModalOpen(false); router.refresh(); }};
-  const handleDeleteLanguage = async () => { if (!languageToDelete) return; const { error } = await supabase.from('resume_languages').delete().eq('id', languageToDelete.id); if (error) { toast({ title: "Error deleting language", description: error.message, variant: "destructive" }); } else { toast({ title: "Success", description: "Language deleted." }); fetchLanguages(); router.refresh(); } setLanguageToDelete(null); setShowLanguageDeleteConfirm(false); };
+  const onLanguageSubmit: SubmitHandler<ResumeLanguageFormData> = async (formData) => { const dataToSave = { ...formData, icon_image_url: formData.icon_image_url?.trim() === '' ? null : formData.icon_image_url, sort_order: Number(formData.sort_order) || 0 }; let response; let action_type: string = ''; let log_description = ''; let details = {}; if (formData.id) { response = await supabase.from('resume_languages').update(dataToSave).eq('id', formData.id).select().single(); action_type = 'RESUME_LANGUAGE_UPDATED'; log_description = `Admin updated language: ${response.data?.language_name}`; details = { language_id: response.data?.id, name: response.data?.language_name };} else { const { id, ...insertData } = dataToSave; response = await supabase.from('resume_languages').insert(insertData).select().single(); action_type = 'RESUME_LANGUAGE_CREATED'; log_description = `Admin created language: ${response.data?.language_name}`; details = { language_id: response.data?.id, name: response.data?.language_name };} if (response.error) { toast({ title: "Error saving language", description: response.error.message, variant: "destructive" }); } else { toast({ title: "Success", description: "Language saved." }); if (currentUser && response.data) { try { await supabase.from('admin_activity_log').insert({ action_type, description: log_description, user_identifier: currentUser.id, details }); window.dispatchEvent(new CustomEvent('adminActivityAdded')); } catch (logError) { console.error(`Error logging ${action_type}:`, logError); }} fetchLanguages(); setIsLanguageModalOpen(false); router.refresh(); }};
+  const handleDeleteLanguage = async () => { if (!languageToDelete) return; const { error } = await supabase.from('resume_languages').delete().eq('id', languageToDelete.id); if (error) { toast({ title: "Error deleting language", description: error.message, variant: "destructive" }); } else { toast({ title: "Success", description: "Language deleted." }); if (currentUser && languageToDelete) { try { await supabase.from('admin_activity_log').insert({ action_type: 'RESUME_LANGUAGE_DELETED', description: `Admin deleted language: ${languageToDelete.language_name}`, user_identifier: currentUser.id, details: { deleted_id: languageToDelete.id, deleted_name: languageToDelete.language_name } }); window.dispatchEvent(new CustomEvent('adminActivityAdded')); } catch (logError) { console.error("Error logging language deletion:", logError); }} fetchLanguages(); router.refresh(); } setLanguageToDelete(null); setShowLanguageDeleteConfirm(false); };
   const triggerLanguageDeleteConfirmation = (language: ResumeLanguage) => { setLanguageToDelete(language); setShowLanguageDeleteConfirm(true); };
   const handleOpenLanguageModal = (language?: ResumeLanguage) => { setCurrentLanguage(language || null); languageForm.reset(language ? {...language, icon_image_url: language.icon_image_url || '', sort_order: Number(language.sort_order ?? 0)} : { language_name: '', proficiency: '', icon_image_url: '', sort_order: 0 }); setIsLanguageModalOpen(true); };
 
-  React.useEffect(() => {
-    fetchResumeMeta(); fetchExperiences(); fetchEducationItems(); fetchKeySkillCategoriesAndSkills(); fetchLanguages();
+  useEffect(() => {
+    fetchResumeMeta();
+    fetchExperiences();
+    fetchEducationItems();
+    fetchKeySkillCategoriesAndSkills();
+    fetchLanguages();
+
+    const authListener = supabase.auth.onAuthStateChange(
+      async (_event, session) => {
+        setCurrentUser(session?.user ?? null);
+      }
+    );
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setCurrentUser(session?.user ?? null);
+    });
+
+    return () => {
+      authListener.data.subscription?.unsubscribe();
+    };
   }, []);
 
   return (

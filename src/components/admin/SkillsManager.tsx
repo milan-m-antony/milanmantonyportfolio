@@ -10,7 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { UploadCloud, PlusCircle, Edit, Trash2, Package as DefaultCategoryIcon, Cpu as DefaultSkillIcon, ChevronDown, Tag as TagIcon } from 'lucide-react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabaseClient';
-import type { SkillCategory, Skill as SkillType } from '@/types/supabase';
+import type { SkillCategory, Skill as SkillType, User as SupabaseUser } from '@/types/supabase';
 import Image from 'next/image';
 import {
   Dialog,
@@ -85,6 +85,7 @@ export default function SkillsManager() {
 
   const [skillCategories, setSkillCategories] = useState<MappedSkillCategory[]>([]);
   const [isLoadingSkills, setIsLoadingSkills] = useState(false);
+  const [currentUser, setCurrentUser] = useState<SupabaseUser | null>(null);
   
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
   const [currentCategory, setCurrentCategory] = useState<MappedSkillCategory | null>(null);
@@ -115,7 +116,20 @@ export default function SkillsManager() {
   const currentCategoryIconUrlForForm = categoryForm.watch('icon_image_url');
   const currentSkillIconUrlForForm = skillForm.watch('icon_image_url');
 
-  useEffect(() => { fetchSkillCategories(); }, []);
+  useEffect(() => { 
+    fetchSkillCategories(); 
+    const authListener = supabase.auth.onAuthStateChange(
+      async (_event, session) => {
+        setCurrentUser(session?.user ?? null);
+      }
+    );
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setCurrentUser(session?.user ?? null);
+    });
+    return () => {
+      authListener.data.subscription?.unsubscribe();
+    };
+  }, []);
 
   useEffect(() => { let newPreviewUrl: string | null = null; if (categoryIconFile) { const reader = new FileReader(); reader.onloadend = () => setCategoryIconPreview(reader.result as string); reader.readAsDataURL(categoryIconFile); return; } else if (currentCategoryIconUrlForForm && currentCategoryIconUrlForForm.trim() !== '') { newPreviewUrl = currentCategoryIconUrlForForm; } else if (currentDbCategoryIconUrl) { newPreviewUrl = currentDbCategoryIconUrl; } setCategoryIconPreview(newPreviewUrl); }, [categoryIconFile, currentCategoryIconUrlForForm, currentDbCategoryIconUrl]);
   useEffect(() => { let newPreviewUrl: string | null = null; if (skillIconFile) { const reader = new FileReader(); reader.onloadend = () => setSkillIconPreview(reader.result as string); reader.readAsDataURL(skillIconFile); return; } else if (currentSkillIconUrlForForm && currentSkillIconUrlForForm.trim() !== '') { newPreviewUrl = currentSkillIconUrlForForm; } else if (currentDbSkillIconUrl) { newPreviewUrl = currentDbSkillIconUrl; } setSkillIconPreview(newPreviewUrl); }, [skillIconFile, currentSkillIconUrlForForm, currentDbSkillIconUrl]);
@@ -165,15 +179,38 @@ export default function SkillsManager() {
     const categoryDataToSave = { name: formData.name, icon_image_url: iconUrlToSave || null, sort_order: formData.sort_order === null || formData.sort_order === undefined ? 0 : Number(formData.sort_order), };
     
     if (formData.id) {
-      const { error: updateError } = await supabase.from('skill_categories').update(categoryDataToSave).eq('id', formData.id);
+      const { error: updateError, data: updateData } = await supabase.from('skill_categories').update(categoryDataToSave).eq('id', formData.id).select().single();
       if (updateError) { toast({ title: "Error updating category", description: updateError.message, variant: "destructive" }); } 
-      else { toast({ title: "Success", description: "Category updated." }); if (oldImageStoragePathToDelete && iconUrlToSave !== existingCategoryIconUrl) { const { error: storageDeleteError } = await supabase.storage.from('category-icons').remove([oldImageStoragePathToDelete]); if (storageDeleteError) console.warn("Error deleting old category icon from storage:", storageDeleteError);}}
+      else { 
+        toast({ title: "Success", description: "Category updated." }); 
+        if (currentUser && updateData) {
+          await supabase.from('admin_activity_log').insert({
+            action_type: 'SKILL_CATEGORY_UPDATED',
+            description: `Skill category "${updateData.name}" was updated.`,
+            user_identifier: currentUser.id,
+            details: { categoryId: updateData.id }
+          });
+          window.dispatchEvent(new CustomEvent('adminActivityAdded'));
+        }
+        if (oldImageStoragePathToDelete && iconUrlToSave !== existingCategoryIconUrl) { const { error: storageDeleteError } = await supabase.storage.from('category-icons').remove([oldImageStoragePathToDelete]); if (storageDeleteError) console.warn("Error deleting old category icon from storage:", storageDeleteError);}
+      }
     } else {
-      const { error: insertError } = await supabase.from('skill_categories').insert(categoryDataToSave);
+      const { error: insertError, data: insertData } = await supabase.from('skill_categories').insert(categoryDataToSave).select().single();
       if (insertError) { toast({ title: "Error adding category", description: insertError.message, variant: "destructive" }); } 
-      else { toast({ title: "Success", description: "Category added." }); }
+      else { 
+        toast({ title: "Success", description: "Category added." }); 
+        if (currentUser && insertData) {
+          await supabase.from('admin_activity_log').insert({
+            action_type: 'SKILL_CATEGORY_CREATED',
+            description: `Skill category "${insertData.name}" was created.`,
+            user_identifier: currentUser.id,
+            details: { categoryId: insertData.id }
+          });
+          window.dispatchEvent(new CustomEvent('adminActivityAdded'));
+        }
+      }
     }
-    fetchSkillCategories(); setIsCategoryModalOpen(false); setCategoryIconFile(null); router.refresh();
+    fetchSkillCategories(); setIsCategoryModalOpen(false); setCategoryIconFile(null);
   };
 
   const onSkillSubmit: SubmitHandler<SkillFormData> = async (formData) => {
@@ -196,33 +233,83 @@ export default function SkillsManager() {
     const skillDataToSave = { category_id: formData.category_id, name: formData.name, icon_image_url: iconUrlToSave || null, description: formData.description || null, };
 
     if (formData.id) {
-      const { error: updateError } = await supabase.from('skills').update(skillDataToSave).eq('id', formData.id);
+      const { error: updateError, data: updateData } = await supabase.from('skills').update(skillDataToSave).eq('id', formData.id).select().single();
       if (updateError) { toast({ title: "Error updating skill", description: updateError.message, variant: "destructive" }); } 
-      else { toast({ title: "Success", description: "Skill updated." }); if (oldImageStoragePathToDelete && iconUrlToSave !== existingSkillIconUrl) { const { error: storageDeleteError } = await supabase.storage.from('skill-icons').remove([oldImageStoragePathToDelete]); if (storageDeleteError) console.warn("Error deleting old skill icon from storage:", storageDeleteError);}}
+      else { 
+        toast({ title: "Success", description: "Skill updated." }); 
+        if (currentUser && updateData) {
+          await supabase.from('admin_activity_log').insert({
+            action_type: 'SKILL_UPDATED',
+            description: `Skill "${updateData.name}" (in category ID: ${updateData.category_id}) was updated.`,
+            user_identifier: currentUser.id,
+            details: { skillId: updateData.id, categoryId: updateData.category_id }
+          });
+          window.dispatchEvent(new CustomEvent('adminActivityAdded'));
+        }
+        if (oldImageStoragePathToDelete && iconUrlToSave !== existingSkillIconUrl) { const { error: storageDeleteError } = await supabase.storage.from('skill-icons').remove([oldImageStoragePathToDelete]); if (storageDeleteError) console.warn("Error deleting old skill icon from storage:", storageDeleteError);}}
     } else {
-      const { error: insertError } = await supabase.from('skills').insert(skillDataToSave);
+      const { error: insertError, data: insertData } = await supabase.from('skills').insert(skillDataToSave).select().single();
       if (insertError) { toast({ title: "Error adding skill", description: insertError.message, variant: "destructive" }); } 
-      else { toast({ title: "Success", description: "Skill added." }); }
+      else { 
+        toast({ title: "Success", description: "Skill added." }); 
+        if (currentUser && insertData) {
+          await supabase.from('admin_activity_log').insert({
+            action_type: 'SKILL_CREATED',
+            description: `Skill "${insertData.name}" (in category ID: ${insertData.category_id}) was created.`,
+            user_identifier: currentUser.id,
+            details: { skillId: insertData.id, categoryId: insertData.category_id }
+          });
+          window.dispatchEvent(new CustomEvent('adminActivityAdded'));
+        }
+      }
     }
-    fetchSkillCategories(); setIsSkillModalOpen(false); setSkillIconFile(null); router.refresh();
+    fetchSkillCategories(); setIsSkillModalOpen(false); setSkillIconFile(null);
   };
 
   const performDeleteCategory = async (categoryId: string) => {
     const category = skillCategories.find(cat => cat.id === categoryId);
     if (category && category.skills && category.skills.length > 0) { toast({ title: "Action Denied", description: "Cannot delete category with skills. Delete skills first.", variant: "destructive" }); setShowCategoryDeleteConfirm(false); setCategoryToDelete(null); return; }
+    const categoryName = category?.name || 'Unknown Category';
     if (category?.iconImageUrl) { try {const url = new URL(category.iconImageUrl); const imagePath = url.pathname.split('/category-icons/')[1]; if (imagePath && !imagePath.startsWith('http')) { const {error: storageError} = await supabase.storage.from('category-icons').remove([imagePath]); if (storageError) console.warn("Error deleting category icon from storage:", storageError);}} catch(e){console.warn("Error parsing category icon URL for deletion", category.iconImageUrl)}}
     const { error } = await supabase.from('skill_categories').delete().eq('id', categoryId);
     if (error) { toast({ title: "Error deleting category", description: error.message, variant: "destructive" }); } 
-    else { toast({ title: "Success", description: "Category deleted." }); fetchSkillCategories(); router.refresh(); }
+    else { 
+      toast({ title: "Success", description: "Category deleted." }); 
+      if (currentUser) {
+        await supabase.from('admin_activity_log').insert({
+          action_type: 'SKILL_CATEGORY_DELETED',
+          description: `Skill category "${categoryName}" (ID: ${categoryId}) was deleted.`,
+          user_identifier: currentUser.id,
+          details: { categoryId: categoryId, deletedName: categoryName }
+        });
+        window.dispatchEvent(new CustomEvent('adminActivityAdded'));
+      }
+      fetchSkillCategories();
+    }
     setShowCategoryDeleteConfirm(false); setCategoryToDelete(null);
   };
 
   const performDeleteSkill = async (skillId: string) => {
     const skillToDeleteData = skillCategories.flatMap(cat => cat.skills).find(s => s.id === skillId);
+    const skillName = skillToDeleteData?.name || 'Unknown Skill';
+    const categoryId = skillToDeleteData?.categoryId || 'Unknown Category ID';
+
     if (skillToDeleteData?.iconImageUrl) { try {const url = new URL(skillToDeleteData.iconImageUrl); const imagePath = url.pathname.split('/skill-icons/')[1]; if (imagePath && !imagePath.startsWith('http')) { const {error: storageError} = await supabase.storage.from('skill-icons').remove([imagePath]); if (storageError) console.warn("Error deleting skill icon from storage:", storageError);}} catch(e){console.warn("Error parsing skill icon URL for deletion", skillToDeleteData.iconImageUrl)}}
     const { error } = await supabase.from('skills').delete().eq('id', skillId);
     if (error) { toast({ title: "Error deleting skill", description: error.message, variant: "destructive" }); } 
-    else { toast({ title: "Success", description: "Skill deleted." }); fetchSkillCategories(); router.refresh(); } 
+    else { 
+      toast({ title: "Success", description: "Skill deleted." }); 
+      if (currentUser) {
+        await supabase.from('admin_activity_log').insert({
+          action_type: 'SKILL_DELETED',
+          description: `Skill "${skillName}" (ID: ${skillId}) from category ID ${categoryId} was deleted.`,
+          user_identifier: currentUser.id,
+          details: { skillId: skillId, categoryId: categoryId, deletedName: skillName }
+        });
+        window.dispatchEvent(new CustomEvent('adminActivityAdded'));
+      }
+      fetchSkillCategories();
+    } 
     setShowSkillDeleteConfirm(false); setSkillToDelete(null);
   };
 

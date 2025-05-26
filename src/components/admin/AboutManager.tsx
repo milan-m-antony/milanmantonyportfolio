@@ -1,4 +1,3 @@
-
 "use client";
 
 import React, { useEffect, useState, type ChangeEvent } from 'react';
@@ -10,7 +9,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { UploadCloud, UserCircle as AboutMeIcon, Trash2 } from 'lucide-react';
 import { supabase } from '@/lib/supabaseClient';
-import type { AboutContent } from '@/types/supabase';
+import type { AboutContent, User as SupabaseUser } from '@/types/supabase';
 import Image from 'next/image';
 import { useForm, type SubmitHandler } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -42,6 +41,7 @@ export default function AboutManager() {
   const [aboutImageFile, setAboutImageFile] = useState<File | null>(null);
   const [aboutImagePreview, setAboutImagePreview] = useState<string | null>(null);
   const [currentDbAboutImageUrl, setCurrentDbAboutImageUrl] = useState<string | null>(null);
+  const [currentUser, setCurrentUser] = useState<SupabaseUser | null>(null);
 
   const aboutForm = useForm<AboutContentFormData>({
     resolver: zodResolver(aboutContentSchema),
@@ -57,6 +57,17 @@ export default function AboutManager() {
 
   useEffect(() => {
     fetchAboutContent();
+    const authListener = supabase.auth.onAuthStateChange(
+      async (_event, session) => {
+        setCurrentUser(session?.user ?? null);
+      }
+    );
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setCurrentUser(session?.user ?? null);
+    });
+    return () => {
+      authListener.data.subscription?.unsubscribe();
+    };
   }, []);
 
   useEffect(() => {
@@ -187,11 +198,24 @@ export default function AboutManager() {
       toast({ title: "Error", description: `Failed to save About Me content: ${upsertError.message}`, variant: "destructive" });
     } else {
       toast({ title: "Success", description: "About Me content saved successfully." });
-      await supabase.from('admin_activity_log').insert({
-            action_type: 'ABOUT_CONTENT_UPDATED',
-            description: `Admin updated the "About Me" section.`,
-            user_identifier: process.env.NEXT_PUBLIC_ADMIN_USERNAME || 'admin'
-      });
+      
+      if (currentUser) {
+        try {
+          await supabase.from('admin_activity_log').insert({
+                action_type: 'ABOUT_CONTENT_UPDATED',
+                description: `Admin updated the "About Me" section.`,
+                user_identifier: currentUser.id,
+                details: {
+                  headline: formData.headline_main,
+                  image_action: aboutImageFile ? 'uploaded_new' : (formData.image_url === '' && !!currentDbAboutImageUrl) ? 'removed' : (formData.image_url && formData.image_url !== currentDbAboutImageUrl) ? 'url_changed' : 'unchanged',
+                  updated_id: dataForUpsert.id
+                }
+          });
+          window.dispatchEvent(new CustomEvent('adminActivityAdded'));
+        } catch (logError) {
+            console.error("[AboutManager] Error logging About Me content update:", logError);
+        }
+      }
 
       if (oldImageStoragePathToDelete && imageUrlToSave !== currentDbAboutImageUrl) {
         console.log("[AboutManager] Attempting to delete old About Me image from storage:", oldImageStoragePathToDelete);

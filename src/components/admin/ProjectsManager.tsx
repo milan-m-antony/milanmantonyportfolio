@@ -9,7 +9,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { UploadCloud, PlusCircle, Edit, Trash2, Briefcase, ExternalLink, Github, Rocket, Wrench, FlaskConical, CheckCircle2, Archive, ClipboardList, type LucideIcon } from 'lucide-react';
 import { supabase } from '@/lib/supabaseClient';
-import type { Project, ProjectStatus } from '@/types/supabase';
+import type { Project, ProjectStatus, User as SupabaseUser, AdminActivityLog } from '@/types/supabase';
 import Image from 'next/image';
 import {
   Dialog,
@@ -77,6 +77,7 @@ export default function ProjectsManager() {
   const [projectToDelete, setProjectToDelete] = useState<Project | null>(null);
   const [projectImageFile, setProjectImageFile] = useState<File | null>(null);
   const [projectImagePreview, setProjectImagePreview] = useState<string | null>(null);
+  const [currentUser, setCurrentUser] = useState<SupabaseUser | null>(null);
 
   const projectForm = useForm<ProjectFormData>({
     resolver: zodResolver(projectSchema),
@@ -87,6 +88,21 @@ export default function ProjectsManager() {
 
   useEffect(() => {
     fetchProjects();
+    const authListener = supabase.auth.onAuthStateChange(
+      async (_event, session) => {
+        const user = session?.user ?? null;
+        setCurrentUser(user);
+      }
+    );
+
+    supabase.auth.getSession().then(({ data: { session } }) => {
+        const user = session?.user ?? null;
+        setCurrentUser(user);
+    });
+
+    return () => {
+      authListener.data.subscription?.unsubscribe();
+    };
   }, []);
 
   useEffect(() => {
@@ -220,17 +236,20 @@ export default function ProjectsManager() {
         toast({ title: "Error", description: `Failed to update project: ${upsertResponse.error.message}`, variant: "destructive" });
       } else {
         toast({ title: "Success", description: "Project updated successfully." });
-         await supabase.from('admin_activity_log').insert({
+        if (currentUser && upsertResponse.data) {
+          await supabase.from('admin_activity_log').insert({
             action_type: 'PROJECT_UPDATED',
             description: `Project "${formData.title}" was updated.`,
-            user_identifier: process.env.NEXT_PUBLIC_ADMIN_USERNAME || 'admin',
-            details: { projectId: formData.id }
+            user_identifier: currentUser.id,
+            details: { projectId: upsertResponse.data.id }
           });
-        // Delete old image from storage if a new one was uploaded OR if the URL was cleared
-        if (oldImageStoragePathToDelete && (projectImageFile || imageUrlToSaveInDb !== existingProjectImageUrlForDeletion)) {
-            console.log("[ProjectsManager] Attempting to delete old project image from storage:", oldImageStoragePathToDelete);
-            const { error: storageDeleteError } = await supabase.storage.from('project-images').remove([oldImageStoragePathToDelete]);
-            if (storageDeleteError) console.warn("[ProjectsManager] Error deleting old project image from storage:", JSON.stringify(storageDeleteError, null, 2));
+          window.dispatchEvent(new CustomEvent('adminActivityAdded'));
+          // Delete old image from storage if a new one was uploaded OR if the URL was cleared
+          if (oldImageStoragePathToDelete && (projectImageFile || imageUrlToSaveInDb !== existingProjectImageUrlForDeletion)) {
+              console.log("[ProjectsManager] Attempting to delete old project image from storage:", oldImageStoragePathToDelete);
+              const { error: storageDeleteError } = await supabase.storage.from('project-images').remove([oldImageStoragePathToDelete]);
+              if (storageDeleteError) console.warn("[ProjectsManager] Error deleting old project image from storage:", JSON.stringify(storageDeleteError, null, 2));
+          }
         }
       }
     } else { 
@@ -244,13 +263,14 @@ export default function ProjectsManager() {
         toast({ title: "Error", description: `Failed to add project: ${upsertResponse.error.message || 'Supabase returned an error. Check RLS or console.'}`, variant: "destructive" });
       } else {
         toast({ title: "Success", description: "Project added successfully." });
-         if (upsertResponse.data) {
+         if (currentUser && upsertResponse.data) {
           await supabase.from('admin_activity_log').insert({
             action_type: 'PROJECT_CREATED',
             description: `Project "${formData.title}" was created.`,
-            user_identifier: process.env.NEXT_PUBLIC_ADMIN_USERNAME || 'admin',
+            user_identifier: currentUser.id,
             details: { projectId: upsertResponse.data.id }
           });
+          window.dispatchEvent(new CustomEvent('adminActivityAdded'));
         }
       }
     }
@@ -264,41 +284,61 @@ export default function ProjectsManager() {
   };
   
   const handleDeleteProject = async () => {
-    if (!projectToDelete) return;
-    console.log("[AdminDashboard][ProjectsManager] Deleting project ID:", projectToDelete.id);
-    
+    if (!projectToDelete || !projectToDelete.id) {
+      toast({ title: "Error", description: "No project selected for deletion.", variant: "destructive" });
+      return;
+    }
+
+    let imageStoragePathToDelete: string | null = null;
     if (projectToDelete.imageUrl) {
-        const imagePath = projectToDelete.imageUrl.substring(projectToDelete.imageUrl.indexOf('/project-images/') + '/project-images/'.length);
-        if (imagePath && !imagePath.startsWith('http')) {
-            console.log("[AdminDashboard][ProjectsManager] Deleting image from storage:", imagePath);
-            const { error: storageError } = await supabase.storage.from('project-images').remove([imagePath]);
-            if (storageError) {
-                console.warn("[AdminDashboard][ProjectsManager] Error deleting project image from storage, proceeding with DB delete:", JSON.stringify(storageError, null, 2));
+        try {
+            const url = new URL(projectToDelete.imageUrl);
+            if (url.pathname.includes('/project-images/')) {
+                const pathParts = url.pathname.split('/project-images/');
+                if (pathParts.length > 1 && !pathParts[1].startsWith('http')) { 
+                    imageStoragePathToDelete = pathParts[1];
+                }
             }
+        } catch (e) {
+            console.warn("[ProjectsManager] Could not parse projectToDelete.imageUrl for path:", projectToDelete.imageUrl);
         }
     }
-    
-    const { error: deleteError } = await supabase
+
+    const { error: dbDeleteError } = await supabase
       .from('projects')
       .delete()
       .eq('id', projectToDelete.id);
 
-    if (deleteError) {
-      console.error("[AdminDashboard][ProjectsManager] Error deleting project from DB:", JSON.stringify(deleteError, null, 2));
-      toast({ title: "Error", description: `Failed to delete project: ${deleteError.message || 'An unexpected error occurred.'}`, variant: "destructive" });
+    if (dbDeleteError) {
+      console.error('Error deleting project from database:', JSON.stringify(dbDeleteError, null, 2));
+      toast({ title: "Error", description: `Failed to delete project: ${dbDeleteError.message}`, variant: "destructive" });
     } else {
-      toast({ title: "Success", description: "Project deleted successfully." });
-       await supabase.from('admin_activity_log').insert({
-        action_type: 'PROJECT_DELETED',
-        description: `Project "${projectToDelete.title}" was deleted.`,
-        user_identifier: process.env.NEXT_PUBLIC_ADMIN_USERNAME || 'admin',
-        details: { projectId: projectToDelete.id }
-      });
+      toast({ title: "Success", description: `Project "${projectToDelete.title}" deleted successfully.` });
+      if (currentUser && projectToDelete) {
+        try {
+          await supabase.from('admin_activity_log').insert({
+            action_type: 'PROJECT_DELETED',
+            description: `Project "${projectToDelete.title}" was deleted.`,
+            user_identifier: currentUser.id,
+            details: { deletedProjectId: projectToDelete.id, deletedTitle: projectToDelete.title }
+          });
+          window.dispatchEvent(new CustomEvent('adminActivityAdded'));
+        } catch (logError) {
+          console.error("Error logging project deletion:", logError);
+        }
+      }
+      if (imageStoragePathToDelete) {
+        console.log("[ProjectsManager] Deleting project image from storage:", imageStoragePathToDelete);
+        const { error: storageDeleteError } = await supabase.storage.from('project-images').remove([imageStoragePathToDelete]);
+        if (storageDeleteError) {
+            console.warn("[ProjectsManager] Error deleting project image from storage after DB deletion:", JSON.stringify(storageDeleteError, null, 2));
+            toast({ title: "Warning", description: `Project data deleted, but failed to delete associated image: ${storageDeleteError.message}. Please check storage.`, variant: "default", duration: 7000 });
+        }
+      }
       fetchProjects();
     }
-    setShowProjectDeleteConfirm(false);
     setProjectToDelete(null);
-    router.refresh(); 
+    setShowProjectDeleteConfirm(false);
   };
 
   const triggerDeleteConfirmation = (project: Project) => {

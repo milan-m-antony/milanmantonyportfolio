@@ -1,4 +1,3 @@
-
 "use client";
 
 import React, { useEffect, useState } from 'react';
@@ -8,7 +7,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { supabase } from '@/lib/supabaseClient';
-import type { LegalDocument } from '@/types/supabase';
+import type { LegalDocument, User as SupabaseUser } from '@/types/supabase';
 import { useForm, type SubmitHandler } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -32,9 +31,10 @@ interface DocumentEditorProps {
   initialTitle: string;
   sectionTitle: string;
   sectionDescription: string;
+  currentUser: SupabaseUser | null;
 }
 
-const DocumentEditor: React.FC<DocumentEditorProps> = ({ documentId, initialTitle, sectionTitle, sectionDescription }) => {
+const DocumentEditor: React.FC<DocumentEditorProps> = ({ documentId, initialTitle, sectionTitle, sectionDescription, currentUser }) => {
   const router = useRouter();
   const { toast } = useToast();
   const [isLoading, setIsLoading] = useState(false);
@@ -92,12 +92,19 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({ documentId, initialTitl
       toast({ title: "Error", description: `Failed to save ${sectionTitle}: ${error.message}`, variant: "destructive" });
     } else {
       toast({ title: "Success", description: `${sectionTitle} saved successfully.` });
-       await supabase.from('admin_activity_log').insert({
-            action_type: 'LEGAL_DOC_UPDATED',
-            description: `Admin updated the "${formData.title}" document.`,
-            user_identifier: process.env.NEXT_PUBLIC_ADMIN_USERNAME || 'admin',
-            details: { documentId: formData.id }
-        });
+      if (currentUser) {
+        try {
+            await supabase.from('admin_activity_log').insert({
+                action_type: 'LEGAL_DOC_UPDATED',
+                description: `Admin updated the "${formData.title}" document.`,
+                user_identifier: currentUser.id,
+                details: { documentId: formData.id, title: formData.title }
+            });
+            window.dispatchEvent(new CustomEvent('adminActivityAdded'));
+        } catch (logError) {
+            console.error("Error logging legal document update:", logError);
+        }
+      }
       router.refresh(); 
     }
     setIsLoading(false);
@@ -150,6 +157,23 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({ documentId, initialTitl
 
 
 export default function LegalManager() {
+  const [currentUser, setCurrentUser] = useState<SupabaseUser | null>(null);
+
+  useEffect(() => {
+    const authListener = supabase.auth.onAuthStateChange(
+      async (_event, session) => {
+        setCurrentUser(session?.user ?? null);
+      }
+    );
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setCurrentUser(session?.user ?? null);
+    });
+
+    return () => {
+      authListener.data.subscription?.unsubscribe();
+    };
+  }, []);
+
   return (
     <ScrollArea className="h-[calc(100vh-10rem)]"> {/* Adjust height as needed */}
       <div className="space-y-8 p-1 pr-3"> {/* Added padding for scrollbar */}
@@ -158,12 +182,14 @@ export default function LegalManager() {
           initialTitle="Terms & Conditions"
           sectionTitle="Terms & Conditions"
           sectionDescription="Manage the content for your Terms & Conditions page."
+          currentUser={currentUser}
         />
         <DocumentEditor
           documentId={PRIVACY_DOC_ID}
           initialTitle="Privacy Policy"
           sectionTitle="Privacy Policy"
           sectionDescription="Manage the content for your Privacy Policy page."
+          currentUser={currentUser}
         />
       </div>
     </ScrollArea>

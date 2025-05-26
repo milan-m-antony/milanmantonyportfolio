@@ -10,7 +10,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter }
 import { Home as HeroIcon, PlusCircle, Edit, Trash2, Save, ImageIcon, Link as GenericLinkIcon } from 'lucide-react';
 import NextImage from 'next/image';
 import { supabase } from '@/lib/supabaseClient';
-import type { HeroContent, StoredHeroSocialLink, HeroSocialLinkItem } from '@/types/supabase';
+import type { HeroContent, StoredHeroSocialLink, HeroSocialLinkItem, User as SupabaseUser } from '@/types/supabase';
 import { useForm, type SubmitHandler, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -44,6 +44,7 @@ export default function HeroManager() {
   const router = useRouter();
   const { toast } = useToast();
   const [isLoading, setIsLoading] = useState(false);
+  const [currentUser, setCurrentUser] = useState<SupabaseUser | null>(null);
   
   const [isSocialLinkModalOpen, setIsSocialLinkModalOpen] = useState(false);
   const [currentSocialLinkForEdit, setCurrentSocialLinkForEdit] = useState<HeroSocialLinkItem | null>(null);
@@ -116,6 +117,17 @@ export default function HeroManager() {
 
   useEffect(() => {
     fetchHeroContent();
+    const authListener = supabase.auth.onAuthStateChange(
+      async (_event, session) => {
+        setCurrentUser(session?.user ?? null);
+      }
+    );
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setCurrentUser(session?.user ?? null);
+    });
+    return () => {
+      authListener.data.subscription?.unsubscribe();
+    };
   }, []);
 
 
@@ -160,6 +172,25 @@ export default function HeroManager() {
     } else {
       toast({ title: "Success", description: "Hero content saved." });
       console.log("[HeroManager] Hero content successfully saved/upserted:", JSON.stringify(upsertedData, null, 2));
+      
+      if (currentUser && upsertedData) {
+        try {
+          await supabase.from('admin_activity_log').insert({
+            action_type: 'HERO_CONTENT_UPDATED',
+            description: `Admin updated the Hero section content.`,
+            user_identifier: currentUser.id,
+            details: { 
+              main_name: dataToUpsert.main_name,
+              subtitles_count: dataToUpsert.subtitles?.length || 0,
+              social_links_count: dataToUpsert.social_media_links?.length || 0,
+              updated_id: upsertedData.id
+            }
+          });
+          window.dispatchEvent(new CustomEvent('adminActivityAdded'));
+        } catch (logError) {
+          console.error("[HeroManager] Error logging hero content update:", logError);
+        }
+      }
       await fetchHeroContent(); // Re-fetch to ensure form state is perfectly aligned with DB
       router.refresh(); // Revalidate public page
     }

@@ -1,4 +1,3 @@
-
 "use client";
 
 import React, { useEffect, useState, type ChangeEvent } from 'react';
@@ -10,7 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter }
 import { PlusCircle, Edit, Trash2, Mail, Link as LinkIcon, Phone, MapPin, Save, MessageSquare, Star, Eye, Filter, Send, Loader2, ImageIcon as DefaultSocialIcon, ChevronDown, Tag as TagIcon } from 'lucide-react';
 import NextImage from 'next/image'; // Ensure NextImage is imported for social link icons
 import { supabase } from '@/lib/supabaseClient';
-import type { ContactPageDetail, SocialLink, ContactSubmission, SubmissionStatus } from '@/types/supabase';
+import type { ContactPageDetail, SocialLink, ContactSubmission, SubmissionStatus, User as SupabaseUser } from '@/types/supabase';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose,
 } from "@/components/ui/dialog";
@@ -58,6 +57,7 @@ const submissionStatuses: SubmissionStatus[] = ['New', 'Replied', 'Archived'];
 export default function ContactManager() {
   const router = useRouter();
   const { toast } = useToast();
+  const [currentUser, setCurrentUser] = useState<SupabaseUser | null>(null);
 
   // --- State for Contact Page Details ---
   const [isLoadingContactDetails, setIsLoadingContactDetails] = useState(false);
@@ -100,15 +100,29 @@ export default function ContactManager() {
   const fetchSocialLinks = async () => { setIsLoadingSocialLinks(true); const { data, error } = await supabase.from('social_links').select('*').order('sort_order', { ascending: true }); if (error) { toast({ title: "Error", description: `Could not fetch social links: ${error.message}`, variant: "destructive" }); console.error("Error fetching social links:", error); } else setSocialLinks((data || []).map(link => ({ ...link, icon_image_url: link.icon_image_url || null }))); setIsLoadingSocialLinks(false);};
   const fetchSubmissions = async () => { setIsLoadingSubmissions(true); let query = supabase.from('contact_submissions').select('*').order('submitted_at', { ascending: false }); if (statusFilter !== 'All') { query = query.eq('status', statusFilter); } const { data, error } = await query; if (error) {toast({ title: "Error", description: `Could not fetch submissions: ${error.message}`, variant: "destructive" }); console.error("Error fetching submissions:", error); } else setSubmissions(data || []); setIsLoadingSubmissions(false); };
 
-  useEffect(() => { fetchContactDetails(); fetchSocialLinks(); }, []);
+  useEffect(() => {
+    fetchContactDetails();
+    fetchSocialLinks();
+    const authListener = supabase.auth.onAuthStateChange(
+      async (_event, session) => {
+        setCurrentUser(session?.user ?? null);
+      }
+    );
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setCurrentUser(session?.user ?? null);
+    });
+    return () => {
+      authListener.data.subscription?.unsubscribe();
+    };
+  }, []);
   useEffect(() => { fetchSubmissions(); }, [statusFilter]);
 
   // --- Submit Handlers ---
-  const onContactDetailsSubmit: SubmitHandler<ContactPageDetailsFormData> = async (formData) => { setIsLoadingContactDetails(true); const dataToUpsert = { ...formData, id: PRIMARY_CONTACT_DETAILS_ID, updated_at: new Date().toISOString() }; const { error } = await supabase.from('contact_page_details').upsert(dataToUpsert, { onConflict: 'id' }); if (error) {toast({ title: "Error", description: `Failed to save contact details: ${error.message}`, variant: "destructive" }); console.error("Error saving contact details:", error); } else { toast({ title: "Success", description: "Contact details saved." }); fetchContactDetails(); router.refresh(); } setIsLoadingContactDetails(false); };
-  const onSocialLinkSubmit: SubmitHandler<SocialLinkFormData> = async (formData) => { const dataToSave = { ...formData, icon_image_url: formData.icon_image_url?.trim() === '' ? null : formData.icon_image_url, sort_order: Number(formData.sort_order) || 0 }; let response; if (formData.id) { response = await supabase.from('social_links').update(dataToSave).eq('id', formData.id).select(); } else { const { id, ...insertData } = dataToSave; response = await supabase.from('social_links').insert(insertData).select(); } if (response.error) {toast({ title: "Error", description: `Failed to save social link: ${response.error.message}`, variant: "destructive" }); console.error("Error saving social link:", response.error); } else { toast({ title: "Success", description: `Social link ${formData.id ? 'updated' : 'added'}.` }); fetchSocialLinks(); setIsSocialLinkModalOpen(false); router.refresh(); }};
+  const onContactDetailsSubmit: SubmitHandler<ContactPageDetailsFormData> = async (formData) => { setIsLoadingContactDetails(true); const dataToUpsert = { ...formData, id: PRIMARY_CONTACT_DETAILS_ID, updated_at: new Date().toISOString() }; const { error } = await supabase.from('contact_page_details').upsert(dataToUpsert, { onConflict: 'id' }); if (error) {toast({ title: "Error", description: `Failed to save contact details: ${error.message}`, variant: "destructive" }); console.error("Error saving contact details:", error); } else { toast({ title: "Success", description: "Contact details saved." }); if (currentUser) { try { await supabase.from('admin_activity_log').insert({ action_type: 'CONTACT_DETAILS_UPDATED', description: 'Admin updated contact page details.', user_identifier: currentUser.id, details: { updated_fields: Object.keys(formData).filter(key => key !== 'id') } }); window.dispatchEvent(new CustomEvent('adminActivityAdded')); } catch (logError) { console.error("Error logging contact details update:", logError); } } fetchContactDetails(); router.refresh(); } setIsLoadingContactDetails(false); };
+  const onSocialLinkSubmit: SubmitHandler<SocialLinkFormData> = async (formData) => { const dataToSave = { ...formData, icon_image_url: formData.icon_image_url?.trim() === '' ? null : formData.icon_image_url, sort_order: Number(formData.sort_order) || 0 }; let response; let action_type: string = ''; let log_description = ''; let details = {}; if (formData.id) { response = await supabase.from('social_links').update(dataToSave).eq('id', formData.id).select().single(); action_type = 'SOCIAL_LINK_UPDATED'; log_description = `Admin updated social link: ${response.data?.label}`; details = { link_id: response.data?.id, label: response.data?.label }; } else { const { id, ...insertData } = dataToSave; response = await supabase.from('social_links').insert(insertData).select().single(); action_type = 'SOCIAL_LINK_CREATED'; log_description = `Admin created social link: ${response.data?.label}`; details = { link_id: response.data?.id, label: response.data?.label };} if (response.error) {toast({ title: "Error", description: `Failed to save social link: ${response.error.message}`, variant: "destructive" }); console.error("Error saving social link:", response.error); } else { toast({ title: "Success", description: `Social link ${formData.id ? 'updated' : 'added'}.` }); if (currentUser && response.data) { try { await supabase.from('admin_activity_log').insert({ action_type, description: log_description, user_identifier: currentUser.id, details }); window.dispatchEvent(new CustomEvent('adminActivityAdded')); } catch (logError) { console.error(`Error logging ${action_type}:`, logError); }} fetchSocialLinks(); setIsSocialLinkModalOpen(false); router.refresh(); }};
   
   // --- Delete Handlers ---
-  const handleDeleteSocialLink = async () => { if (!socialLinkToDelete) return; const { error } = await supabase.from('social_links').delete().eq('id', socialLinkToDelete.id); if (error) {toast({ title: "Error", description: `Failed to delete social link: ${error.message}`, variant: "destructive" }); console.error("Error deleting social link:", error); } else { toast({ title: "Success", description: "Social link deleted." }); fetchSocialLinks(); router.refresh(); } setShowSocialLinkDeleteConfirm(false); setSocialLinkToDelete(null); };
+  const handleDeleteSocialLink = async () => { if (!socialLinkToDelete) return; const { error } = await supabase.from('social_links').delete().eq('id', socialLinkToDelete.id); if (error) {toast({ title: "Error", description: `Failed to delete social link: ${error.message}`, variant: "destructive" }); console.error("Error deleting social link:", error); } else { toast({ title: "Success", description: "Social link deleted." }); if (currentUser && socialLinkToDelete) { try { await supabase.from('admin_activity_log').insert({ action_type: 'SOCIAL_LINK_DELETED', description: `Admin deleted social link: ${socialLinkToDelete.label}`, user_identifier: currentUser.id, details: { deleted_id: socialLinkToDelete.id, deleted_label: socialLinkToDelete.label } }); window.dispatchEvent(new CustomEvent('adminActivityAdded')); } catch (logError) { console.error("Error logging social link deletion:", logError); } } fetchSocialLinks(); router.refresh(); } setShowSocialLinkDeleteConfirm(false); setSocialLinkToDelete(null); };
   
   // --- Modal Openers ---
   const handleOpenSocialLinkModal = (link?: SocialLink) => { setCurrentSocialLink(link || null); socialLinkForm.reset(link ? { ...link, icon_image_url: link.icon_image_url || '', sort_order: link.sort_order ?? 0 } : { label: '', icon_image_url: '', url: '', display_text: '', sort_order: 0 }); setIsSocialLinkModalOpen(true); };
@@ -116,9 +130,9 @@ export default function ContactManager() {
   
   // --- Submission Handlers ---
   const handleViewMessage = (submission: ContactSubmission) => { setSelectedSubmission(submission); setIsViewMessageModalOpen(true); };
-  const handleUpdateSubmissionStatus = async (submissionId: string, newStatus: SubmissionStatus) => { const { error } = await supabase.from('contact_submissions').update({ status: newStatus }).eq('id', submissionId); if (error) {toast({ title: "Error", description: `Failed to update status: ${error.message}`, variant: "destructive" }); console.error("Error updating submission status:", error); } else { toast({ title: "Success", description: "Submission status updated." }); fetchSubmissions(); }};
-  const handleToggleStar = async (submission: ContactSubmission) => { const { error } = await supabase.from('contact_submissions').update({ is_starred: !submission.is_starred }).eq('id', submission.id); if (error) {toast({ title: "Error", description: `Failed to update star: ${error.message}`, variant: "destructive" }); console.error("Error toggling star:", error); } else { toast({ title: "Success", description: "Star status updated." }); fetchSubmissions(); }};
-  const handleDeleteSubmission = async () => { if (!submissionToDeleteForDialog) return; const { error } = await supabase.from('contact_submissions').delete().eq('id', submissionToDeleteForDialog.id); if (error) {toast({ title: "Error", description: `Failed to delete submission: ${error.message}`, variant: "destructive" }); console.error("Error deleting submission:", error); } else { toast({ title: "Success", description: "Submission deleted." }); fetchSubmissions(); } setShowSubmissionDeleteConfirmDialog(false); setSubmissionToDeleteForDialog(null); };
+  const handleUpdateSubmissionStatus = async (submissionId: string, newStatus: SubmissionStatus) => { const { error } = await supabase.from('contact_submissions').update({ status: newStatus }).eq('id', submissionId); if (error) {toast({ title: "Error", description: `Failed to update status: ${error.message}`, variant: "destructive" }); console.error("Error updating submission status:", error); } else { toast({ title: "Success", description: "Submission status updated." }); if (currentUser) { try { await supabase.from('admin_activity_log').insert({ action_type: 'SUBMISSION_STATUS_UPDATED', description: `Admin updated submission status to ${newStatus} for ID: ${submissionId.substring(0,8)}...`, user_identifier: currentUser.id, details: { submission_id: submissionId, new_status: newStatus } }); window.dispatchEvent(new CustomEvent('adminActivityAdded')); } catch (logError) { console.error("Error logging submission status update:", logError); } } fetchSubmissions(); }};
+  const handleToggleStar = async (submission: ContactSubmission) => { const { error } = await supabase.from('contact_submissions').update({ is_starred: !submission.is_starred }).eq('id', submission.id); if (error) {toast({ title: "Error", description: `Failed to update star: ${error.message}`, variant: "destructive" }); console.error("Error toggling star:", error); } else { toast({ title: "Success", description: "Star status updated." }); if (currentUser) { try { await supabase.from('admin_activity_log').insert({ action_type: 'SUBMISSION_STAR_TOGGLED', description: `Admin ${submission.is_starred ? 'unstarred' : 'starred'} submission ID: ${submission.id.substring(0,8)}...`, user_identifier: currentUser.id, details: { submission_id: submission.id, new_star_state: !submission.is_starred } }); window.dispatchEvent(new CustomEvent('adminActivityAdded')); } catch (logError) { console.error("Error logging submission star toggle:", logError); } } fetchSubmissions(); }};
+  const handleDeleteSubmission = async () => { if (!submissionToDeleteForDialog) return; const { error } = await supabase.from('contact_submissions').delete().eq('id', submissionToDeleteForDialog.id); if (error) {toast({ title: "Error", description: `Failed to delete submission: ${error.message}`, variant: "destructive" }); console.error("Error deleting submission:", error); } else { toast({ title: "Success", description: "Submission deleted." }); if (currentUser && submissionToDeleteForDialog) { try { await supabase.from('admin_activity_log').insert({ action_type: 'SUBMISSION_DELETED', description: `Admin deleted submission from: ${submissionToDeleteForDialog.email} (ID: ${submissionToDeleteForDialog.id.substring(0,8)}...)`, user_identifier: currentUser.id, details: { deleted_id: submissionToDeleteForDialog.id, deleted_from_email: submissionToDeleteForDialog.email } }); window.dispatchEvent(new CustomEvent('adminActivityAdded')); } catch (logError) { console.error("Error logging submission deletion:", logError); } } fetchSubmissions(); } setShowSubmissionDeleteConfirmDialog(false); setSubmissionToDeleteForDialog(null); };
   const triggerSubmissionDeleteConfirmation = (submission: ContactSubmission) => { setSubmissionToDeleteForDialog(submission); setShowSubmissionDeleteConfirmDialog(true); };
 
   const handleOpenReplyModal = (submission: ContactSubmission) => {
@@ -188,6 +202,19 @@ export default function ContactManager() {
             variant: "default",
             duration: 7000 
         });
+        if (currentUser && submissionToReplyTo) {
+            try {
+                await supabase.from('admin_activity_log').insert({
+                    action_type: 'SUBMISSION_REPLY_SENT',
+                    description: `Admin sent reply to submission from: ${submissionToReplyTo.email} (ID: ${submissionToReplyTo.id.substring(0,8)}...)`,
+                    user_identifier: currentUser.id,
+                    details: { submission_id: submissionToReplyTo.id, recipient_email: submissionToReplyTo.email }
+                });
+                window.dispatchEvent(new CustomEvent('adminActivityAdded'));
+            } catch (logError) {
+                console.error("Error logging submission reply sent:", logError);
+            }
+        }
         setIsReplyModalOpen(false);
         setReplyMessage('');
         // Optimistically update status, or rely on fetchSubmissions if Edge Function handles it

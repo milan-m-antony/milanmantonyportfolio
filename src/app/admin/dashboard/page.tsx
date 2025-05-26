@@ -103,6 +103,24 @@ function getPageTitle(sectionKey: string): string {
   return item ? item.label : "Portfolio Admin";
 }
 
+async function getRLSBypassToken(): Promise<string | null> {
+  try {
+    const { data: { session }, error } = await supabase.auth.getSession();
+    if (error) {
+      console.error("[AdminDashboardPage] Error getting session for RLS bypass token:", error);
+      return null;
+    }
+    if (session?.access_token) {
+      return session.access_token;
+    }
+    console.warn("[AdminDashboardPage] No session or access token found for RLS bypass.");
+    return null;
+  } catch (e) {
+    console.error("[AdminDashboardPage] Exception while getting RLS bypass token:", e);
+    return null;
+  }
+}
+
 export default function AdminDashboardPage() {
   const router = useRouter();
   const { toast } = useToast();
@@ -255,28 +273,34 @@ export default function AdminDashboardPage() {
   
   const handleSaveMaintenanceMessage = async () => {
     if (!currentUser) {
-        toast({ title: "Auth Error", description: "Please log in to save settings.", variant: "destructive"});
+        toast({ title: "Auth Error", description: "Please log in to change settings.", variant: "destructive"});
         return;
     }
     setIsLoadingSettings(true);
-    const { error: updateError } = await supabase
+    const { error: updateError, data: updateData } = await supabase
       .from('site_settings')
       .update({ maintenance_message: maintenanceMessageInput, updated_at: new Date().toISOString() })
-      .eq('id', ADMIN_SITE_SETTINGS_ID);
+      .eq('id', ADMIN_SITE_SETTINGS_ID)
+      .select()
+      .single();
 
     if (updateError) {
-      console.error("Error saving maintenance message:", updateError);
-      toast({ title: "Error", description: `Failed to save maintenance message: ${updateError.message}`, variant: "destructive" });
+      console.error("Error updating maintenance message:", updateError);
+      toast({ title: "Error", description: `Failed to update maintenance message: ${updateError.message}`, variant: "destructive" });
     } else {
       toast({ title: "Success", description: "Maintenance message saved." });
-       try {
-        await supabase.from('admin_activity_log').insert({
-            action_type: 'MAINTENANCE_MESSAGE_UPDATED',
-            description: `Admin updated the site maintenance message.`,
-            user_identifier: currentUser.id
-        });
-      } catch (logError) {
-          console.error("Error logging maintenance message update:", logError);
+      if (currentUser) {
+        try {
+          await supabase.from('admin_activity_log').insert({
+              action_type: 'MAINTENANCE_MESSAGE_UPDATED',
+              description: `Admin updated site maintenance message.`,
+              user_identifier: currentUser.id,
+              details: { message: maintenanceMessageInput }
+          });
+          window.dispatchEvent(new CustomEvent('adminActivityAdded'));
+        } catch (logError) {
+            console.error("Error logging maintenance message update:", logError);
+        }
       }
     }
     setIsLoadingSettings(false);
@@ -285,67 +309,74 @@ export default function AdminDashboardPage() {
   const handleLoginSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setError('');
-    setIsLoadingAuth(true);
-    
-    const trimmedEmail = emailInput.trim();
-    const trimmedPassword = passwordInput; 
-
-    console.log("[AdminDashboardPage] Attempting Supabase login for email:", trimmedEmail);
-    
+    if (!emailInput || !passwordInput) {
+      setError('Email and password are required.');
+      return;
+    }
     const { data, error: signInError } = await supabase.auth.signInWithPassword({
-      email: trimmedEmail,
-      password: trimmedPassword, 
+      email: emailInput,
+      password: passwordInput,
     });
 
-    setIsLoadingAuth(false);
-
     if (signInError) {
-      console.error("[AdminDashboardPage] Supabase Sign In Error:", signInError.message, signInError);
-      setError(signInError.message || "Invalid login credentials.");
-      toast({ title: "Login Failed", description: signInError.message || "Invalid login credentials.", variant: "destructive" });
-    } else if (data.user) {
-      console.log("[AdminDashboardPage] Supabase Login successful for user:", data.user.email);
-      toast({ title: "Login Successful", description: "Welcome to the admin dashboard." });
-      try {
-        await supabase.from('admin_activity_log').insert({ 
-            action_type: 'ADMIN_LOGIN_SUCCESS', 
-            description: `Admin "${data.user.email}" logged in successfully.`,
-            user_identifier: data.user.id 
+      console.error("Login error:", signInError);
+      setError(signInError.message || 'Invalid login credentials.');
+      if (currentUser) {
+        try {
+          await supabase.from('admin_activity_log').insert({
+            action_type: 'ADMIN_LOGIN_FAILURE',
+            description: `Admin login attempt failed for ${emailInput}. Reason: ${signInError.message}`,
+            user_identifier: emailInput,
+            details: { error: signInError.message, attempt_email: emailInput }
           });
-      } catch (logError) {
-        console.error("Error logging admin login:", logError);
+          window.dispatchEvent(new CustomEvent('adminActivityAdded'));
+        } catch (logError) {
+          console.error("Error logging failed login attempt:", logError);
+        }
       }
-      // No longer need to set localStorage as Supabase session is now used.
-      // router.replace('/admin/dashboard'); // This can cause issues if already on the page; onAuthStateChange handles UI update
+    } else if (data.user) {
+      console.log("Login successful, user:", data.user.email);
+      setCurrentUser(data.user as SupabaseUserType);
+      toast({ title: "Login Successful", description: `Welcome back, ${data.user.email?.split('@')[0]}!`});
+      try {
+        await supabase.from('admin_activity_log').insert({
+          action_type: 'ADMIN_LOGIN_SUCCESS',
+          description: `Admin user ${data.user.email} logged in successfully.`,
+          user_identifier: data.user.id,
+          details: { email: data.user.email }
+        });
+        window.dispatchEvent(new CustomEvent('adminActivityAdded'));
+      } catch (logError) {
+        console.error("Error logging successful login:", logError);
+      }
     } else {
-        setError("An unexpected error occurred during login. No user data returned.");
-        toast({ title: "Login Error", description: "An unexpected error occurred. Please try again.", variant: "destructive" });
+        setError("An unexpected error occurred during login. Please try again.");
+        console.error("Login succeeded but no user data returned.");
     }
   };
 
   const handleLogout = async () => {
-    if (!currentUser) return;
-    const userIdForLog = currentUser.id; 
-    const userEmailForLog = currentUser.email || "Admin"; 
-    console.log(`[AdminDashboardPage] Attempting Supabase logout for user: ${userEmailForLog}`);
-    
+    const userBeforeLogout = currentUser;
+    setError('');
     const { error: signOutError } = await supabase.auth.signOut();
-
     if (signOutError) {
-        console.error("[AdminDashboardPage] Error signing out:", signOutError);
-        toast({ title: "Logout Error", description: signOutError.message, variant: "destructive"});
+      console.error("Logout error:", signOutError);
+      toast({ title: "Logout Failed", description: signOutError.message, variant: "destructive"});
     } else {
-        console.log("[AdminDashboardPage] Supabase Logout successful.");
-        toast({ title: "Logged Out", description: "You have been successfully logged out." });
+      toast({ title: "Logged Out", description: "You have been successfully logged out." });
+      if (userBeforeLogout) {
         try {
-          await supabase.from('admin_activity_log').insert({ 
-              action_type: 'ADMIN_LOGOUT', 
-              description: `Admin "${userEmailForLog}" logged out.`,
-              user_identifier: userIdForLog 
-            });
+          await supabase.from('admin_activity_log').insert({
+            action_type: 'ADMIN_LOGOUT_SUCCESS',
+            description: `Admin user ${userBeforeLogout.email} logged out.`,
+            user_identifier: userBeforeLogout.id,
+            details: { email: userBeforeLogout.email }
+          });
+          window.dispatchEvent(new CustomEvent('adminActivityAdded'));
         } catch (logError) {
-          console.error("Error logging admin logout:", logError);
+          console.error("Error logging successful logout:", logError);
         }
+      }
     }
   };
 
@@ -377,7 +408,7 @@ export default function AdminDashboardPage() {
       return;
     }
     
-    setIsDeletingData(true); // Start "deleting" state when password modal is submitted
+    setIsDeletingData(true);
 
     const { data: reauthData, error: signInForReauthError } = await supabase.auth.signInWithPassword({
         email: currentUser.email,
@@ -387,7 +418,7 @@ export default function AdminDashboardPage() {
     if (signInForReauthError || !reauthData.user) {
         console.error("[AdminDashboardPage] Re-authentication for delete failed:", signInForReauthError);
         toast({ title: "Password Incorrect", description: "The admin password entered is incorrect.", variant: "destructive"});
-        setIsDeletingData(false); // Stop "deleting" state if password fails
+        setIsDeletingData(false);
         return;
     }
 
@@ -409,83 +440,66 @@ export default function AdminDashboardPage() {
 
   const handleFinalDeleteAllData = async () => {
     if (!currentUser) {
-        toast({ title: "Authentication Error", description: "Action aborted. User not authenticated.", variant: "destructive"});
-        if (isDeletingData) setIsDeletingData(false);
-        // if (isProcessingFinalDeletion) setIsProcessingFinalDeletion(false); // Should not be true here typically
-        return;
-    }
-    if (deleteCountdown > 0) {
-      toast({ title: "Cannot Delete Yet", description: "Please wait for the countdown.", variant: "default"});
+      toast({ title: "Authentication Error", description: "You must be logged in to delete data.", variant: "destructive"});
+      setIsDeletingData(false);
+      setShowDeleteDataConfirmModal(false);
       return;
     }
-    const selectedSectionKeys = Object.entries(selectedSectionsForDeletion)
-                                   .filter(([key, value]) => value)
-                                   .map(([key]) => key as DeletableSectionKey);
+    setIsProcessingFinalDeletion(true);
+
+    const selectedSectionKeys = deletableSectionsConfig
+      .filter(section => selectedSectionsForDeletion[section.key])
+      .map(section => section.key);
 
     if (selectedSectionKeys.length === 0) {
-        toast({ title: "No Sections Selected", description: "Deletion aborted. No data groups were selected.", variant: "default" });
-        setShowDeleteDataConfirmModal(false);
-        setIsDeletingData(false); 
-        // setIsProcessingFinalDeletion(false); // Should be false here already
-        return;
+      toast({ title: "No Sections Selected", description: "Please select at least one data group to delete.", variant: "default"});
+      setIsProcessingFinalDeletion(false);
+      setIsDeletingData(false);
+      setShowDeleteDataConfirmModal(false);
+      return;
     }
-
-    setIsProcessingFinalDeletion(true); // Set processing state for the final button
-    toast({ title: "Processing Deletion", description: `Attempting to delete selected data groups and associated files...`});
 
     try {
-      console.log('[AdminDashboardPage] Invoking danger-delete-all-data Edge Function with sections:', selectedSectionKeys);
-      
-      const payload: { sections_to_delete: DeletableSectionKey[]; user_id_for_quick_notes?: string } = {
-        sections_to_delete: selectedSectionKeys
-      };
+      const { data: result, error: invokeError } = await supabase.functions.invoke(
+        'danger-delete-all-data',
+        { body: { sectionKeys: selectedSectionKeys } }
+      );
 
-      if (selectedSectionKeys.includes('quick_notes_user')) {
-        payload.user_id_for_quick_notes = currentUser.id;
+      if (invokeError) {
+        console.error("Error invoking 'danger-delete-all-data' Edge Function:", invokeError);
+        toast({ title: "Deletion Error", description: `Failed to call deletion service: ${invokeError.message}`, variant: "destructive" });
+      } else if (result && result.error) {
+        console.error("Error reported by 'danger-delete-all-data' Edge Function:", result.error);
+        toast({ title: "Deletion Failed", description: `The deletion service reported an error: ${result.error}`, variant: "destructive" });
+      } else if (result && result.success) {
+        toast({ title: "Deletion Successful", description: "Selected data groups have been cleared.", duration: 7000 });
+        // Optionally, provide more details from result.results if needed
+        result.results?.forEach((res: any) => {
+          if (res.success) {
+            console.log(`Successfully processed section: ${res.sectionKey}`);
+          } else {
+            console.warn(`Failed to process section: ${res.sectionKey} - ${res.message}`);
+          }
+        });
+      } else if (result && !result.success && result.results) {
+         toast({ title: "Partial Deletion", description: "Some sections were not fully cleared. Check console for details.", variant: "destructive", duration: 10000 });
+         result.results?.forEach((res: any) => {
+            console.warn(`Partial/Failed deletion for section ${res.sectionKey}: ${res.message}`, res.details);
+         });
+      } else {
+        toast({ title: "Unknown Error", description: "An unexpected issue occurred during deletion. Check server logs.", variant: "destructive" });
       }
-
-      const { data: functionData, error: functionError } = await supabase.functions.invoke('danger-delete-all-data', {
-        body: payload 
-      });
-
-      if (functionError) {
-        console.error("[AdminDashboardPage] Error invoking Edge Function (raw):", JSON.stringify(functionError, null, 2));
-        let detailedMessage = "Function invocation failed. Check Edge Function logs.";
-        if (functionError.message?.includes("Function not found")) {
-            detailedMessage = "The 'danger-delete-all-data' Edge Function could not be found. Ensure it's deployed.";
-        } else if (functionError.name === 'FunctionsHttpError' || functionError.name === 'FunctionsRelayError' || functionError.name === 'FunctionsFetchError') {
-             const context = (functionError as any).context;
-             if (!context || Object.keys(context).length === 0 || (context.message && context.message.includes("Failed to fetch"))) {
-                 detailedMessage = "Edge Function call failed or returned an error. Check Supabase Edge Function logs for details (e.g., missing secrets, code errors, CORS, or network issues).";
-             } else if (context.message) {
-                 detailedMessage = `Edge Function Error: ${context.message}`;
-             }
-        }
-        throw new Error(detailedMessage);
-      }
-      
-      if (functionData && functionData.error) {
-         console.error("[AdminDashboardPage] Error returned from Edge Function logic:", JSON.stringify(functionData.error, null, 2));
-         throw new Error(typeof functionData.error === 'string' ? functionData.error : "An error occurred in the Edge Function's data deletion logic.");
-      }
-
-      toast({ title: "Success", description: functionData?.message || "Selected data groups deletion process initiated successfully.", duration: 7000 });
-      await supabase.from('admin_activity_log').insert({
-        action_type: 'DATA_DELETION_INITIATED_SELECTIVE',
-        description: `Admin initiated deletion for data groups: ${selectedSectionKeys.join(', ')}.`,
-        user_identifier: currentUser.id,
-        details: { deleted_sections: selectedSectionKeys }
-      });
-      setSelectedSectionsForDeletion(deletableSectionsConfig.reduce((acc, section) => ({ ...acc, [section.key]: false }), {} as Record<DeletableSectionKey, boolean>));
-      router.refresh(); 
-    } catch (err: any) {
-      console.error("[AdminDashboardPage] Caught error after trying to invoke Edge Function:", err);
-      toast({ title: "Deletion Failed", description: err.message || "Failed to initiate data deletion. Check Edge Function & browser console logs.", variant: "destructive", duration: 9000 });
-    } finally {
-      setIsProcessingFinalDeletion(false); // Reset processing state for the final button
-      setIsDeletingData(false); 
-      setShowDeleteDataConfirmModal(false);
+    } catch (e) {
+      console.error("Exception during Edge Function invocation:", e);
+      toast({ title: "System Error", description: "A system error occurred while trying to delete data.", variant: "destructive" });
     }
+
+    // Reset UI states regardless of outcome
+    setSelectedSectionsForDeletion(deletableSectionsConfig.reduce((acc, section) => ({ ...acc, [section.key]: false }), {} as Record<DeletableSectionKey, boolean>));
+    setAdminPasswordConfirm('');
+    setShowDeleteDataConfirmModal(false);
+    setIsDeletingData(false);
+    setIsProcessingFinalDeletion(false);
   };
 
 
@@ -725,7 +739,7 @@ export default function AdminDashboardPage() {
               onClick={() => {
                 setShowDeleteDataConfirmModal(false);
                 if (deleteCountdownIntervalRef.current) clearInterval(deleteCountdownIntervalRef.current);
-                setIsDeletingData(false); // Stop "deleting" state if user cancels final step
+                setIsDeletingData(false);
               }}
               className={cn(buttonVariants({ variant: "outline" }), "border-destructive-foreground/40 text-destructive-foreground", "hover:bg-destructive-foreground/10 hover:text-destructive-foreground hover:border-destructive-foreground/60")}
             >Cancel</AlertDialogCancel>
