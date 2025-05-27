@@ -1379,7 +1379,7 @@ export default function AdminPageLayout({
         <AlertDialogFooter>
           <AlertDialogCancel 
             onClick={() => setShowClearLogConfirm(false)} 
-            className={cn(buttonVariants({ variant: "outline" }), "border-destructive-foreground/40 text-destructive-foreground", "hover:bg-destructive-foreground/10 hover:text-destructive-foreground hover:border-destructive-foreground/60")}
+            className={cn(buttonVariants({ variant: "outline" }), "border-destructive-foreground/40 light:text-destructive dark:text-destructive-foreground", "hover:bg-destructive-foreground/10 hover:text-destructive-foreground hover:border-destructive-foreground/60")}
           >Cancel</AlertDialogCancel>
           <AlertDialogAction 
             onClick={handleClearActivityLog} 

@@ -11,6 +11,8 @@ import Preloader from '@/components/layout/Preloader';
 import VisitTracker from '@/components/analytics/VisitTracker'; // Import the VisitTracker
 import LivePresenceTracker from '@/components/utils/LivePresenceTracker'; // Import LivePresenceTracker
 
+export const revalidate = 0;
+
 const geistSans = Geist({
   variable: '--font-geist-sans',
   subsets: ['latin'],
