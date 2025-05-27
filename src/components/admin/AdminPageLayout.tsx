@@ -43,10 +43,10 @@ import {
 import type { LucideIcon } from 'lucide-react';
 import { useTheme } from '@/contexts/ThemeProvider';
 import { cn } from '@/lib/utils';
-import React, { useState, useEffect, type ChangeEvent, type ReactNode, useCallback } from 'react';
+import React, { useState, useEffect, type ChangeEvent, type ReactNode, useCallback, useRef } from 'react';
 import { format, parseISO, isValid as isValidDate } from 'date-fns';
 import * as AccordionPrimitive from "@radix-ui/react-accordion";
-import QuickNotes from "@/components/ui/QuickNotes";
+import QuickNotes, { type QuickNotesHandle } from "@/components/ui/QuickNotes";
 import LiveVisitorCount from '@/components/utils/LiveVisitorCount';
 
 
@@ -642,6 +642,7 @@ export default function AdminPageLayout({
   const [adminUsername, setAdminUsername] = useState<string | null>(null);
 
   const [isQuickNotesModalOpen, setIsQuickNotesModalOpen] = useState(false);
+  const quickNotesRef = useRef<QuickNotesHandle>(null);
 
   const fetchAdminProfile = useCallback(async () => {
     const { data: { user: currentUser } } = await supabase.auth.getUser();
@@ -1268,12 +1269,10 @@ export default function AdminPageLayout({
     {/* Modal for Changing Profile Picture */}
     <Dialog open={isPhotoModalOpen} onOpenChange={setIsPhotoModalOpen}>
         <DialogContent className="sm:max-w-md">
-            <DialogPrimitiveHeader>
-                <DialogPrimitiveDialogTitle>Change Profile Picture</DialogPrimitiveDialogTitle>
-                <DialogDescription>
-                    Upload a new photo or remove the current one. Image will be circular.
-                </DialogDescription>
-            </DialogPrimitiveHeader>
+            <DialogPrimitiveDialogTitle className="text-center sm:text-left">Change Profile Picture</DialogPrimitiveDialogTitle>
+            <DialogDescription className="text-center sm:text-left mt-[0.375rem]">
+                Upload a new photo or remove the current one. Image will be circular.
+            </DialogDescription>
             <ScrollArea className="max-h-[70vh] p-1 pr-2">
               <div className="grid gap-6 py-4 px-2">
                   <div className="space-y-2">
@@ -1311,10 +1310,8 @@ export default function AdminPageLayout({
     {/* Modal for Account Settings (Email & Password) */}
     <Dialog open={isAccountSettingsModalOpen} onOpenChange={setIsAccountSettingsModalOpen}>
       <DialogContent className="sm:max-w-md">
-        <DialogPrimitiveHeader>
-          <DialogPrimitiveDialogTitle>Account Settings</DialogPrimitiveDialogTitle>
-          <DialogDescription>Manage your admin account email/username and password.</DialogDescription>
-        </DialogPrimitiveHeader>
+        <DialogPrimitiveDialogTitle className="text-center sm:text-left">Account Settings</DialogPrimitiveDialogTitle>
+        <DialogDescription className="text-center sm:text-left mt-[0.375rem]">Manage your admin account email/username and password.</DialogDescription>
         <ScrollArea className="max-h-[70vh] p-1 pr-2">
           <div className="grid gap-6 py-4 px-2">
             <Card>
@@ -1397,17 +1394,21 @@ export default function AdminPageLayout({
     </AlertDialog>
 
     {/* Modal for Quick Notes */}
-    <Dialog open={isQuickNotesModalOpen} onOpenChange={setIsQuickNotesModalOpen}>
+    <Dialog open={isQuickNotesModalOpen} onOpenChange={(isOpen) => {
+        if (!isOpen) {
+            // Dialog is closing
+            quickNotesRef.current?.triggerSaveIfAutoSaveEnabled();
+        }
+        setIsQuickNotesModalOpen(isOpen);
+    }}>
         <DialogContent className="sm:max-w-2xl md:max-w-3xl lg:max-w-4xl xl:max-w-5xl">
-            <DialogPrimitiveHeader>
-                <DialogPrimitiveDialogTitle>Quick Notes</DialogPrimitiveDialogTitle>
-                <DialogDescription>
-                    Jot down your thoughts, ideas, or tasks.
-                </DialogDescription>
-            </DialogPrimitiveHeader>
+            <DialogPrimitiveDialogTitle className="text-center sm:text-left">Quick Notes</DialogPrimitiveDialogTitle>
+            <DialogDescription className="text-center sm:text-left mt-[0.375rem]">
+                Jot down your thoughts, ideas, or tasks.
+            </DialogDescription>
             <ScrollArea className="max-h-[70vh] p-1 pr-2">
                  <div className="py-4 px-2">
-                    <QuickNotes />
+                    <QuickNotes ref={quickNotesRef} />
                  </div>
             </ScrollArea>
             <DialogPrimitiveFooter className="pt-4 border-t">

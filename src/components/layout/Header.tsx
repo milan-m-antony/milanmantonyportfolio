@@ -1,9 +1,8 @@
-
 "use client";
 
 import Link from 'next/link';
 import NextImage from 'next/image'; // Ensure NextImage is imported
-import { useState, useEffect, type ReactNode } from 'react';
+import { useState, useEffect, type ReactNode, useRef, useCallback } from 'react';
 import { usePathname } from 'next/navigation';
 import { Menu, X, Sun, Moon, Home, User, Briefcase, Wrench, Map as MapIcon, Award, FileText, Mail } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -68,66 +67,95 @@ export default function Header() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isClient, setIsClient] = useState(false);
   const { theme, setTheme } = useTheme();
-  const [activeLink, setActiveLink] = useState<string>('#hero');
+  const [activeLink, setActiveLink] = useState('');
   const pathname = usePathname();
+  const headerRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
     setIsClient(true); // Set to true once component mounts on client
   }, []);
 
-  useEffect(() => {
-    const determineActiveLink = () => {
-      if (!isClient || pathname.startsWith('/admin')) {
-        return;
-      }
-      
-      const currentHash = window.location.hash;
-      const currentPath = pathname;
+  const determineActiveLink = useCallback(() => {
+    if (typeof window === 'undefined' || !headerRef.current) {
+      // Default to first link on initial server render or if headerRef not available yet
+      // setActiveLink(navLinks.length > 0 ? navLinks[0].href : ''); 
+      return;
+    }
 
-      if (currentPath === '/') {
-        if (currentHash && currentHash !== '#') {
-          if (publicNavItems.some(item => item.href === currentHash)) {
-            setActiveLink(currentHash);
-            return;
+    const headerHeight = headerRef.current.offsetHeight;
+    // fromTop is the imaginary line just below the header, against which sections are checked
+    const fromTop = window.scrollY + headerHeight + 20; 
+
+    let candidateHref = '';
+
+    // Main loop: Check if 'fromTop' is INSIDE any section
+    for (const link of publicNavItems) {
+      const sectionId = link.href.substring(1);
+      const section = document.getElementById(sectionId);
+
+      if (section) {
+        const sectionTop = section.offsetTop;
+        const sectionBottom = sectionTop + section.offsetHeight;
+
+        // If 'fromTop' is within this section's bounds
+        if (fromTop >= sectionTop && fromTop < sectionBottom) {
+          candidateHref = link.href;
+          break; // Found the section 'fromTop' is currently in
+        }
+      }
+    }
+
+    // If 'fromTop' is not strictly within any section (e.g., in padding, above first, or below last)
+    if (!candidateHref) {
+      // Find the last section whose top 'fromTop' has passed.
+      // This means this section was the one active before entering padding.
+      let lastPassedSectionHref = '';
+      for (const link of publicNavItems) {
+        const sectionId = link.href.substring(1);
+        const section = document.getElementById(sectionId);
+        if (section) {
+          const sectionTop = section.offsetTop;
+          if (sectionTop <= fromTop) { // If section's top is at or above 'fromTop'
+            lastPassedSectionHref = link.href; // This section is a candidate
+          } else {
+            // If sectionTop is below fromTop, then previous (lastPassedSectionHref) was the one.
+            // No need to check further down sections.
+            break;
           }
         }
-
-        let newActiveLink = '#hero'; 
-        let minDistance = Infinity;
-        const referencePoint = 150; 
-
-        for (const item of publicNavItems) {
-          if (item.href.startsWith('/')) continue; 
-
-          const element = document.getElementById(item.href.substring(1));
-          if (element) {
-            const rect = element.getBoundingClientRect();
-            const elementTop = rect.top;
-            const elementBottom = rect.bottom;
-            const viewportHeight = window.innerHeight;
-            const isInView = elementTop < viewportHeight && elementBottom > 0;
-
-            if (isInView) {
-                const distance = Math.abs(elementTop - referencePoint);
-                if (distance < minDistance) {
-                    minDistance = distance;
-                    newActiveLink = item.href;
-                }
-            }
-          }
-        }
-        if ((window.innerHeight + Math.ceil(window.scrollY)) >= document.body.offsetHeight - 50) {
-            const contactItem = publicNavItems.find(item => item.href === '#contact');
-            if (contactItem) newActiveLink = contactItem.href;
-        }
-        else if (window.scrollY <= 50) {
-            const heroItem = publicNavItems.find(item => item.href === '#hero');
-            if (heroItem) newActiveLink = heroItem.href;
-        }
-        setActiveLink(newActiveLink);
       }
-    };
+      if (lastPassedSectionHref) {
+        candidateHref = lastPassedSectionHref;
+      }
+    }
     
+    // Override 1: At the very top of the page?
+    // Use a small threshold for scrollY. headerHeight * 0.8 might be too large if header is tall.
+    if (window.scrollY < 50) { 
+      if (publicNavItems.length > 0) {
+        const homeLink = publicNavItems.find(l => l.href === '#hero'); // Prefer explicit #hero
+        candidateHref = homeLink ? homeLink.href : publicNavItems[0].href;
+      }
+    }
+
+    // Override 2: At the very bottom of the page?
+    const totalPageHeight = document.body.scrollHeight;
+    // Check if bottom of viewport is at or past bottom of document
+    const scrolledToBottom = (window.innerHeight + window.scrollY) >= (totalPageHeight - 5); // Small tolerance
+
+    if (scrolledToBottom && publicNavItems.length > 0) {
+      candidateHref = publicNavItems[publicNavItems.length - 1].href; // Activate the last link
+    }
+    
+    // Final Safety Net: If no candidateHref is determined after all checks, and navLinks exist
+    if (!candidateHref && publicNavItems.length > 0) {
+      candidateHref = publicNavItems[0].href;
+    }
+
+    setActiveLink(candidateHref);
+  }, [setActiveLink]); // Dependencies for useCallback
+
+  useEffect(() => {
     if (isClient) {
       determineActiveLink();
       window.addEventListener('scroll', determineActiveLink, { passive: true });
@@ -142,7 +170,7 @@ export default function Header() {
         window.removeEventListener('resize', determineActiveLink);
       }
     };
-  }, [pathname, isClient, activeLink]); 
+  }, [pathname, isClient, activeLink, determineActiveLink]); 
 
   const toggleTheme = () => {
     if (!isClient) return;
@@ -236,3 +264,4 @@ export default function Header() {
     </header>
   );
 }
+

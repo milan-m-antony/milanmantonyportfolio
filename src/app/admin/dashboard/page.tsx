@@ -710,7 +710,7 @@ export default function AdminDashboardPage() {
           <AlertDialogFooter>
             <AlertDialogCancel 
               onClick={() => setShowDeleteDataPasswordModal(false)}
-              className={cn(buttonVariants({ variant: "outline" }), "border-destructive-foreground/40 text-destructive-foreground", "hover:bg-destructive-foreground/10 hover:text-destructive-foreground hover:border-destructive-foreground/60")}
+              className={cn(buttonVariants({ variant: "default" }), "bg-destructive-foreground text-destructive", "hover:bg-destructive-foreground/90")}
             >Cancel</AlertDialogCancel>
             <AlertDialogAction 
               onClick={handlePasswordConfirmForDelete}

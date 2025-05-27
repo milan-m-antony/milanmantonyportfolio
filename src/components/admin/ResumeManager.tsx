@@ -415,12 +415,18 @@ export default function ResumeManager() {
                 <Accordion type="single" collapsible className="w-full">
                     {keySkillCategories.map((category) => (
                     <AccordionItem value={category.id} key={category.id}>
-                         <AccordionPrimitive.Header className="flex items-center justify-between py-2 px-4 group border-b hover:bg-muted/50 transition-colors">
-                            <ShadCNAccordionTrigger asChild className="flex-grow cursor-pointer py-2 hover:no-underline">
-                                <div className="flex items-center gap-3"><IconPreview url={category.icon_image_url} alt={category.category_name} DefaultIcon={TypeIcon} className="h-5 w-5 p-0" /><span className="font-medium text-lg">{category.category_name}</span><Badge variant="outline" className="ml-2">{category.skills?.length || 0} skills</Badge><ChevronDown className="h-4 w-4 shrink-0 transition-transform duration-200 group-data-[state=open]:rotate-180 ml-auto text-muted-foreground group-hover:text-foreground" /></div>
+                        <div className="flex items-center justify-between py-2 px-4 group border-b hover:bg-muted/50 transition-colors">
+                            <ShadCNAccordionTrigger className="flex flex-grow items-center gap-3 cursor-pointer py-0 hover:no-underline">
+                                <IconPreview url={category.icon_image_url} alt={category.category_name} DefaultIcon={TypeIcon} className="h-5 w-5 p-0" />
+                                <span className="font-medium text-md">{category.category_name}</span>
+                                <Badge variant="outline" className="ml-2">{category.skills?.length || 0} skills</Badge>
                             </ShadCNAccordionTrigger>
-                            <div className="flex space-x-1.5 shrink-0 ml-3 pl-3 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity duration-200"><Button variant="ghost" size="icon" className="h-8 w-8" onClick={(e) => { e.stopPropagation(); handleOpenSkillCategoryModal(category);}}><Edit className="h-4 w-4" /></Button><Button variant="ghost" size="icon" className="h-8 w-8 hover:text-destructive" onClick={(e) => { e.stopPropagation(); triggerSkillCategoryDeleteConfirmation(category);}}><Trash2 className="h-4 w-4" /></Button><Button variant="ghost" size="icon" className="h-8 w-8 hover:text-primary" onClick={(e) => { e.stopPropagation(); handleOpenSkillModal(category.id);}}><PlusCircle className="h-4 w-4"/></Button></div>
-                        </AccordionPrimitive.Header>
+                            <div className="flex space-x-1.5 shrink-0 ml-3 pl-3 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity duration-200">
+                                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={(e) => { e.stopPropagation(); handleOpenSkillCategoryModal(category);}}><Edit className="h-4 w-4" /></Button>
+                                <Button variant="ghost" size="icon" className="h-8 w-8 hover:text-destructive" onClick={(e) => { e.stopPropagation(); triggerSkillCategoryDeleteConfirmation(category);}}><Trash2 className="h-4 w-4" /></Button>
+                                <Button variant="ghost" size="icon" className="h-8 w-8 hover:text-primary" onClick={(e) => { e.stopPropagation(); handleOpenSkillModal(category.id);}}><PlusCircle className="h-4 w-4"/></Button>
+                            </div>
+                        </div>
                         <AccordionContent className="bg-muted/20 p-4 rounded-b-md">
                             {category.skills && category.skills.length > 0 ? (<div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">{category.skills.map(skill => (<Card key={skill.id} className="p-3 shadow-sm hover:shadow-md transition-shadow"><div className="flex items-center justify-between"><span className="text-sm font-medium">{skill.skill_name}</span><div className="flex space-x-1"><Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleOpenSkillModal(category.id, skill)}><Edit className="h-3.5 w-3.5" /></Button><Button variant="ghost" size="icon" className="h-7 w-7 hover:text-destructive" onClick={() => triggerSkillDeleteConfirmation(skill)}><Trash2 className="h-3.5 w-3.5" /></Button></div></div></Card>))}</div>) : (<p className="text-sm text-muted-foreground text-center py-4">No skills in this category. <Button variant="link" size="sm" className="p-0 h-auto" onClick={() => handleOpenSkillModal(category.id)}>Add one?</Button></p>)}
                         </AccordionContent>

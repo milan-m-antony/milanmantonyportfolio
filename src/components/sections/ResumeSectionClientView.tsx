@@ -36,9 +36,9 @@ import type {
 
 interface ResumeDetailItemProps {
   title: string;
-  subtitle?: string;
-  date?: string;
-  description?: string | string[];
+  subtitle?: string | null;
+  date?: string | null;
+  description?: string | string[] | null;
   iconImageUrl?: string | null;
   DefaultIconComponent?: React.ElementType;
 }
@@ -60,7 +60,7 @@ const ResumeDetailItem: React.FC<ResumeDetailItemProps> = ({
   );
 
   return (
-    <div className="mb-6 last:mb-0">
+    <div className="mb-8 last:mb-0">
       <div className="flex items-start mb-1">
         <div className="mr-3 mt-1">{iconContent}</div>
         <div className="flex-grow">
@@ -68,9 +68,9 @@ const ResumeDetailItem: React.FC<ResumeDetailItemProps> = ({
           {subtitle && <p className="text-sm text-muted-foreground">{subtitle}</p>}
         </div>
       </div>
-      {date && <p className="text-xs text-muted-foreground mb-2 ml-9">{date}</p>}
+      {date && <p className="text-xs text-muted-foreground mb-2 ml-0 sm:ml-9">{date}</p>}
       {description && (
-        <div className="ml-9 text-sm text-foreground/80">
+        <div className="ml-0 sm:ml-9 text-sm text-foreground/80">
           {Array.isArray(description) ? (
             <ul className="list-disc list-inside space-y-1">
               {description.map((item, index) => (
@@ -105,6 +105,14 @@ export default function ResumeSectionClientView({
   const [formattedLastUpdated, setFormattedLastUpdated] = useState<string | null>(null);
   const { toast } = useToast();
 
+  // Check if all essential data is missing or empty
+  const noResumeDataAvailable = 
+    !resumeMetaData &&
+    experienceData.length === 0 &&
+    educationData.length === 0 &&
+    keySkillsData.length === 0 &&
+    languagesData.length === 0;
+
   const resumePdfUrl = resumeMetaData?.resume_pdf_url;
 
   useEffect(() => {
@@ -119,6 +127,24 @@ export default function ResumeSectionClientView({
       setFormattedLastUpdated(null);
     }
   }, [resumeMetaData?.updated_at]);
+
+  // Console log the received props for debugging
+  console.log("[ResumeSectionClientView] Received Data:", {
+    resumeMetaData,
+    experienceData,
+    educationData,
+    keySkillsData,
+    languagesData,
+    noResumeDataAvailable
+  });
+
+  if (noResumeDataAvailable) {
+    return (
+      <div className="py-10 text-center text-muted-foreground">
+        <p>Resume data is currently unavailable. Please check back later or ensure data is populated in the admin panel.</p>
+      </div>
+    );
+  }
 
   const handleDownloadClick = async () => {
     if (!resumePdfUrl) {
@@ -175,7 +201,169 @@ export default function ResumeSectionClientView({
 
   return (
     <>
-      {/* ...no changes needed in the rest, you already pasted fully */}
+      <div className="mb-10 flex flex-col items-center gap-4"> 
+        {formattedLastUpdated && (
+          <p className="text-xs text-muted-foreground">
+            Last updated: {formattedLastUpdated}
+          </p>
+        )}
+        {resumePdfUrl && (
+          <div className="flex gap-2 flex-wrap"> 
+            <Button onClick={() => setIsPdfPreviewOpen(true)} variant="outline">
+              <Eye className="mr-2 h-4 w-4" /> Preview PDF
+            </Button>
+            <Button onClick={handleDownloadClick}>
+              <Download className="mr-2 h-4 w-4" /> Download PDF
+            </Button>
+          </div>
+        )}
+      </div>
+
+      <Tabs defaultValue="experience" className="w-full">
+        <TabsList className="grid w-full grid-cols-2 sm:grid-cols-4 mb-10 gap-2">
+          <TabsTrigger value="experience" disabled={experienceData.length === 0} className="inline-flex items-center justify-center whitespace-nowrap rounded-sm px-3 py-1.5 text-sm font-medium ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm transition-colors duration-200">Experience</TabsTrigger>
+          <TabsTrigger value="education" disabled={educationData.length === 0} className="inline-flex items-center justify-center whitespace-nowrap rounded-sm px-3 py-1.5 text-sm font-medium ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm transition-colors duration-200">Education</TabsTrigger>
+          <TabsTrigger value="skills" disabled={keySkillsData.length === 0} className="bg-muted hover:bg-muted/90 inline-flex items-center justify-center whitespace-nowrap rounded-sm px-3 py-1.5 text-sm font-medium ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm transition-colors duration-200">Key Skills</TabsTrigger>
+          <TabsTrigger value="languages" disabled={languagesData.length === 0} className="bg-muted hover:bg-muted/90 inline-flex items-center justify-center whitespace-nowrap rounded-sm px-3 py-1.5 text-sm font-medium ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm transition-colors duration-200">Languages</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="experience">
+          <Card className="hover:shadow-lg hover:scale-[1.02] hover:border-primary/50 border border-transparent transition-all duration-300 ease-out">
+            <CardHeader>
+              <CardTitle>Work Experience</CardTitle>
+            </CardHeader>
+            <CardContent className="p-4 sm:p-6">
+              {experienceData.length > 0 ? (
+                experienceData.map((exp) => (
+                  <ResumeDetailItem
+                    key={exp.id}
+                    title={exp.job_title}
+                    subtitle={exp.company_name}
+                    date={exp.date_range ?? undefined}
+                    description={exp.description_points ?? undefined}
+                    iconImageUrl={exp.icon_image_url}
+                    DefaultIconComponent={DefaultExperienceIcon}
+                  />
+                ))
+              ) : (
+                <p className="text-muted-foreground">No work experience details available.</p>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="education">
+          <Card className="hover:shadow-lg hover:scale-[1.02] hover:border-primary/50 border border-transparent transition-all duration-300 ease-out">
+            <CardHeader>
+              <CardTitle>Education & Certifications</CardTitle>
+            </CardHeader>
+            <CardContent className="p-4 sm:p-6">
+              {educationData.length > 0 ? (
+                educationData.map((edu) => (
+                  <ResumeDetailItem
+                    key={edu.id}
+                    title={edu.degree_or_certification}
+                    subtitle={edu.institution_name}
+                    date={edu.date_range ?? undefined}
+                    description={edu.description ?? undefined}
+                    iconImageUrl={edu.icon_image_url}
+                    DefaultIconComponent={DefaultEducationIcon}
+                  />
+                ))
+              ) : (
+                <p className="text-muted-foreground">No education details available.</p>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="skills">
+          <Card className="bg-card hover:shadow-lg hover:scale-[1.02] hover:border-primary/50 border border-transparent transition-all duration-300 ease-out">
+            <CardHeader>
+              <CardTitle>Key Skills</CardTitle>
+            </CardHeader>
+            <CardContent className="p-4 sm:p-6">
+              {keySkillsData.length > 0 ? (
+                keySkillsData.map((category) => (
+                  <div key={category.id} className="mb-8 last:mb-0">
+                    <div className="flex items-center mb-4">
+                      {category.icon_image_url ? (
+                        <div className="relative h-7 w-7 rounded-sm overflow-hidden border bg-muted mr-3 flex-shrink-0">
+                          <NextImage src={category.icon_image_url} alt={`${category.category_name} icon`} fill className="object-contain" sizes="28px"/>
+                        </div>
+                      ) : (
+                         <ListChecks className="h-7 w-7 text-primary mr-3 flex-shrink-0" />
+                      )}
+                      <h4 className="text-xl font-semibold text-foreground">{category.category_name}</h4>
+                    </div>
+                    {category.skills && category.skills.length > 0 ? (
+                      <div className="ml-4 sm:ml-10 flex flex-wrap gap-3">
+                        {category.skills.map((skill: ResumeKeySkill) => (
+                          <Badge key={skill.id} variant="secondary" className="text-sm">
+                            {skill.skill_name}
+                          </Badge>
+                        ))}
+                      </div>
+                    ) : (
+                       <p className="ml-4 sm:ml-10 text-sm text-muted-foreground">No skills listed in this category.</p>
+                    )}
+                  </div>
+                ))
+              ) : (
+                <p className="text-muted-foreground">No key skills details available.</p>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="languages">
+          <Card className="bg-card hover:shadow-lg hover:scale-[1.02] hover:border-primary/50 border border-transparent transition-all duration-300 ease-out">
+            <CardHeader>
+              <CardTitle>Languages</CardTitle>
+            </CardHeader>
+            <CardContent className="p-4 sm:p-6">
+              {languagesData.length > 0 ? (
+                languagesData.map((lang) => (
+                  <ResumeDetailItem
+                    key={lang.id}
+                    title={lang.language_name}
+                    subtitle={lang.proficiency ?? undefined}
+                    iconImageUrl={lang.icon_image_url}
+                    DefaultIconComponent={DefaultLanguagesIcon}
+                  />
+                ))
+              ) : (
+                <p className="text-muted-foreground">No language details available.</p>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
+
+      {resumePdfUrl && (
+        <Dialog open={isPdfPreviewOpen} onOpenChange={setIsPdfPreviewOpen}>
+          <DialogContent className="max-w-3xl h-[90vh]">
+            <DialogHeader>
+              <DialogTitle>Resume PDF Preview</DialogTitle>
+              <DialogDescription>
+                Viewing your resume PDF. You can also download it.
+                {formattedLastUpdated && (<p className="text-xs mt-1">Last Updated: {formattedLastUpdated}</p>)}
+              </DialogDescription>
+            </DialogHeader>
+            <ScrollArea className="h-[calc(90vh-150px)]"> {/* Adjust height as needed */}
+              <iframe
+                src={resumePdfUrl}
+                className="w-full h-full min-h-[500px]"
+                title="Resume PDF Preview"
+              />
+            </ScrollArea>
+            <div className="flex justify-end gap-2 pt-4 border-t">
+               <Button onClick={handleDownloadClick}><Download className="mr-2 h-4 w-4" />Download PDF</Button>
+               <DialogClose asChild><Button variant="outline">Close</Button></DialogClose>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
     </>
   );
 }

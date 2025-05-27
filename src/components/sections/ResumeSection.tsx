@@ -1,6 +1,6 @@
-
 "use server";
 
+import React from 'react';
 import SectionWrapper from '@/components/ui/SectionWrapper';
 import SectionTitle from '@/components/ui/SectionTitle';
 import ResumeSectionClientView from './ResumeSectionClientView';
@@ -16,137 +16,107 @@ import type {
 // Fixed ID for the resume_meta table, ensure this matches the ID used in ResumeManager.tsx
 const PRIMARY_RESUME_META_ID = '00000000-0000-0000-0000-000000000003';
 
-async function getResumeMeta(): Promise<ResumeMeta | null> {
-  const { data, error, status, statusText } = await supabase
-    .from('resume_meta')
-    .select('id, description, resume_pdf_url, updated_at') // Ensure updated_at is selected
-    .eq('id', PRIMARY_RESUME_META_ID)
-    .maybeSingle();
+async function getResumeData() {
+  console.log('[ResumeSection] Attempting to fetch all resume data...');
 
-  if (error) {
-    let errorMessage = 'Error fetching resume meta. ';
-    if (typeof error === 'object' && error !== null) {
-      const supabaseError = error as { message?: string; details?: string; hint?: string; code?: string };
-      errorMessage += `Message: ${supabaseError.message || 'N/A'}, Details: ${supabaseError.details || 'N/A'}, Hint: ${supabaseError.hint || 'N/A'}, Code: ${supabaseError.code || 'N/A'}. `;
-    }
-    errorMessage += `Status: ${status || 'N/A'} ${statusText || 'N/A'}.`;
-    console.error(errorMessage);
-    return null;
+  let resumeMetaData: ResumeMeta | null = null;
+  try {
+    const { data, error } = await supabase
+      .from('resume_meta')
+      .select('*')
+      .eq('id', PRIMARY_RESUME_META_ID)
+      .maybeSingle();
+    if (error) throw error;
+    resumeMetaData = data;
+    console.log('[ResumeSection] Fetched resumeMetaData:', resumeMetaData ? `ID: ${resumeMetaData.id}, Desc: ${resumeMetaData.description?.substring(0,20)}...` : 'No data');
+  } catch (error) {
+    console.error('[ResumeSection] Error fetching resume_meta:', error);
   }
-  return data;
-}
 
-
-async function getResumeExperience(): Promise<ResumeExperience[]> {
-  const { data, error, status, statusText } = await supabase
-    .from('resume_experience')
-    .select('id, job_title, company_name, date_range, description_points, icon_image_url, sort_order, created_at')
-    .order('sort_order', { ascending: true });
-
-  if (error) {
-    let errorMessage = 'Error fetching resume experience. ';
-     if (typeof error === 'object' && error !== null) {
-      const supabaseError = error as { message?: string; details?: string; hint?: string; code?: string };
-      errorMessage += `Message: ${supabaseError.message || 'N/A'}, Details: ${supabaseError.details || 'N/A'}, Hint: ${supabaseError.hint || 'N/A'}, Code: ${supabaseError.code || 'N/A'}. `;
-    }
-    errorMessage += `Status: ${status || 'N/A'} ${statusText || 'N/A'}.`;
-    console.error(errorMessage);
-    return [];
+  let experienceData: ResumeExperience[] = [];
+  try {
+    const { data, error } = await supabase
+      .from('resume_experience')
+      .select('*')
+      .order('sort_order', { ascending: true });
+    if (error) throw error;
+    experienceData = data || [];
+    console.log('[ResumeSection] Fetched experienceData count:', experienceData.length);
+  } catch (error) {
+    console.error('[ResumeSection] Error fetching resume_experience:', error);
   }
-  return (data || []).map(item => ({ ...item, icon_image_url: item.icon_image_url || null }));
-}
 
-async function getResumeEducation(): Promise<ResumeEducation[]> {
-  const { data, error, status, statusText } = await supabase
-    .from('resume_education')
-    .select('id, degree_or_certification, institution_name, date_range, description, icon_image_url, sort_order, created_at')
-    .order('sort_order', { ascending: true });
-
-  if (error) {
-     let errorMessage = 'Error fetching resume education. ';
-    if (typeof error === 'object' && error !== null) {
-      const supabaseError = error as { message?: string; details?: string; hint?: string; code?: string };
-      errorMessage += `Message: ${supabaseError.message || 'N/A'}, Details: ${supabaseError.details || 'N/A'}, Hint: ${supabaseError.hint || 'N/A'}, Code: ${supabaseError.code || 'N/A'}. `;
-    }
-    errorMessage += `Status: ${status || 'N/A'} ${statusText || 'N/A'}.`;
-    console.error(errorMessage);
-    return [];
+  let educationData: ResumeEducation[] = [];
+  try {
+    const { data, error } = await supabase
+      .from('resume_education')
+      .select('*')
+      .order('sort_order', { ascending: true });
+    if (error) throw error;
+    educationData = data || [];
+    console.log('[ResumeSection] Fetched educationData count:', educationData.length);
+  } catch (error) {
+    console.error('[ResumeSection] Error fetching resume_education:', error);
   }
-  return (data || []).map(item => ({ ...item, icon_image_url: item.icon_image_url || null }));
-}
-
-async function getResumeKeySkills(): Promise<ResumeKeySkillCategory[]> {
-  const { data, error, status, statusText } = await supabase
-    .from('resume_key_skill_categories')
-    .select(`
-      id,
-      category_name,
-      icon_image_url,
-      sort_order,
-      created_at,
-      resume_key_skills (id, skill_name, category_id)
-    `)
-    .order('sort_order', { ascending: true });
-
-
-  if (error) {
-    let errorMessage = 'Error fetching resume key skills. ';
-    if (typeof error === 'object' && error !== null) {
-      const supabaseError = error as { message?: string; details?: string; hint?: string; code?: string };
-      errorMessage += `Message: ${supabaseError.message || 'N/A'}, Details: ${supabaseError.details || 'N/A'}, Hint: ${supabaseError.hint || 'N/A'}, Code: ${supabaseError.code || 'N/A'}. `;
-    }
-    errorMessage += `Status: ${status || 'N/A'} ${statusText || 'N/A'}.`;
-    console.error(errorMessage);
-    return [];
+  
+  let keySkillsData: ResumeKeySkillCategory[] = [];
+  try {
+    const { data, error } = await supabase
+      .from('resume_key_skill_categories')
+      .select('*, resume_key_skills(*)')
+      .order('sort_order', { ascending: true })
+      .order('skill_name', { foreignTable: 'resume_key_skills', ascending: true });
+    if (error) throw error;
+    keySkillsData = (data || []).map(category => ({
+      ...category,
+      skills: category.resume_key_skills || []
+    }));
+    console.log('[ResumeSection] Fetched keySkillsData count:', keySkillsData.length);
+  } catch (error) {
+    console.error('[ResumeSection] Error fetching resume_key_skill_categories:', error);
   }
-  return (data || []).map(category => ({
-    ...category,
-    icon_image_url: category.icon_image_url || null,
-    skills: (category.resume_key_skills || []).map(skill => ({ ...skill }))
-  }));
-}
 
-async function getResumeLanguages(): Promise<ResumeLanguage[]> {
-  const { data, error, status, statusText } = await supabase
-    .from('resume_languages')
-    .select('id, language_name, proficiency, icon_image_url, sort_order, created_at')
-    .order('sort_order', { ascending: true });
-
-  if (error) {
-    let errorMessage = 'Error fetching resume languages. ';
-    if (typeof error === 'object' && error !== null) {
-      const supabaseError = error as { message?: string; details?: string; hint?: string; code?: string };
-      errorMessage += `Message: ${supabaseError.message || 'N/A'}, Details: ${supabaseError.details || 'N/A'}, Hint: ${supabaseError.hint || 'N/A'}, Code: ${supabaseError.code || 'N/A'}. `;
-    }
-    errorMessage += `Status: ${status || 'N/A'} ${statusText || 'N/A'}.`;
-    console.error(errorMessage);
-    return [];
+  let languagesData: ResumeLanguage[] = [];
+  try {
+    const { data, error } = await supabase
+      .from('resume_languages')
+      .select('*')
+      .order('sort_order', { ascending: true });
+    if (error) throw error;
+    languagesData = data || [];
+    console.log('[ResumeSection] Fetched languagesData count:', languagesData.length);
+  } catch (error) {
+    console.error('[ResumeSection] Error fetching resume_languages:', error);
   }
-  return (data || []).map(item => ({ ...item, icon_image_url: item.icon_image_url || null }));
-}
 
-
-export default async function ResumeSection() {
-  const [
+  console.log('[ResumeSection] Finished fetching all resume data.');
+  return {
     resumeMetaData,
     experienceData,
     educationData,
     keySkillsData,
-    languagesData
-  ] = await Promise.all([
-    getResumeMeta(),
-    getResumeExperience(),
-    getResumeEducation(),
-    getResumeKeySkills(),
-    getResumeLanguages()
-  ]);
+    languagesData,
+  };
+}
+
+export default async function ResumeSection() {
+  console.log('[ResumeSection] SERVER COMPONENT RENDERING');
+  const { 
+    resumeMetaData, 
+    experienceData, 
+    educationData, 
+    keySkillsData, 
+    languagesData 
+  } = await getResumeData();
+
+  const sectionSubtitle = resumeMetaData?.description || "A comprehensive overview of my qualifications, experience, and skills.";
 
   return (
-    <SectionWrapper id="resume" className="section-fade-in" style={{ animationDelay: '1.2s' }}>
-      <SectionTitle subtitle="A comprehensive overview of my qualifications, experience, and skills.">
+    <SectionWrapper id="resume" aria-labelledby="resume-title" className="section-fade-in scroll-mt-16">
+      <SectionTitle id="resume-title" subtitle={sectionSubtitle}>
         My Resume / CV
       </SectionTitle>
-      <ResumeSectionClientView
+      <ResumeSectionClientView 
         resumeMetaData={resumeMetaData}
         experienceData={experienceData}
         educationData={educationData}

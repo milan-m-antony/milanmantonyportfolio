@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef, forwardRef, useImperativeHandle } from 'react';
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
@@ -24,7 +24,11 @@ interface QuickNoteDbRecord {
     updated_at: string;
 }
 
-const QuickNotes: React.FC = () => {
+export interface QuickNotesHandle {
+    triggerSaveIfAutoSaveEnabled: () => Promise<void>;
+}
+
+const QuickNotes: React.ForwardRefRenderFunction<QuickNotesHandle> = (props, ref) => {
     const [notesList, setNotesList] = useState<QuickNoteDbRecord[]>([]);
     const [activeNoteId, setActiveNoteId] = useState<string | null>(null); 
     const [isComposingNewNote, setIsComposingNewNote] = useState<boolean>(false);
@@ -44,6 +48,8 @@ const QuickNotes: React.FC = () => {
 
     const { toast } = useToast();
     const suggestedTags = ["idea", "urgent", "task", "remember"];
+
+    const prevActiveNoteIdRef = useRef<string | null>(null); // Added ref
 
     const activeNote = useMemo(() => {
         return notesList.find(n => n.id === activeNoteId) || null;
@@ -90,22 +96,33 @@ const QuickNotes: React.FC = () => {
     }, [toast, activeNoteId, isComposingNewNote]); // Added activeNoteId, isComposingNewNote
 
     useEffect(() => {
+        // This effect is for syncing the selected note (from the list) to the editor UI
         if (activeNoteId && activeNote) {
-            setIsLoadingEditor(true);
-            setNoteTitle(activeNote.title || '');
-            setNoteContent(activeNote.content || '');
-            setTags(activeNote.tags || []);
+            // If the activeNoteId has changed (user selected a different note)
+            // or if there was no previous active note (initial load with a selection)
+            if (activeNoteId !== prevActiveNoteIdRef.current) {
+                setIsLoadingEditor(true);
+                setNoteTitle(activeNote.title || '');
+                setNoteContent(activeNote.content || '');
+                setTags(activeNote.tags || []);
+                setIsComposingNewNote(false); // Ensure we are not in "composing new" mode
+                setIsLoadingEditor(false);
+            }
+            // Always update lastUpdated from the activeNote, as it reflects DB truth
             setLastUpdated(new Date(activeNote.updated_at).toLocaleString());
-            setIsComposingNewNote(false); // No longer composing new if we load an existing note
-            setIsLoadingEditor(false);
         } else if (isComposingNewNote) {
-            // Clear editor for new note if not loading an existing one
-            setNoteTitle('');
-            setNoteContent('');
-            setTags([]);
+            // If composing a new note, ensure editor is clear
+            // Only clear if we are moving TO new note mode, or if editor had content from a previous state.
+            if (prevActiveNoteIdRef.current !== null || noteTitle !== '' || noteContent !== '' || tags.length > 0) {
+                setNoteTitle('');
+                setNoteContent('');
+                setTags([]);
+            }
             setLastUpdated('Never');
         }
-    }, [activeNoteId, activeNote, isComposingNewNote]);
+        // Update the ref for the next comparison
+        prevActiveNoteIdRef.current = activeNoteId;
+    }, [activeNoteId, activeNote, isComposingNewNote]); // Removed noteTitle, noteContent, tags from external deps of this specific effect
 
     const saveCurrentNote = useCallback(async (title: string, content: string, currentTags: string[]) => {
         if (!currentUser) {
@@ -150,26 +167,18 @@ const QuickNotes: React.FC = () => {
         return savedNote; 
     }, [currentUser, toast, activeNoteId, isComposingNewNote, notesList]); 
 
-    // const debouncedSave = useCallback(debounce((t, c, currentT) => saveCurrentNote(t, c, currentT), 2500), [saveCurrentNote]);
+    const debouncedSave = useCallback(debounce((t, c, currentT) => saveCurrentNote(t, c, currentT), 5000), [saveCurrentNote]);
 
-    // useEffect(() => {
-    //     let intervalId: NodeJS.Timeout | undefined;
-    //     if (autoSave && (activeNoteId || isComposingNewNote) && !isLoadingEditor && !isSaving) { 
-    //         intervalId = setInterval(() => saveCurrentNote(noteTitle, noteContent, tags), 10000); 
-    //     }
-    //     return () => { if (intervalId) clearInterval(intervalId); };
-    // }, [autoSave, noteTitle, noteContent, tags, activeNoteId, isComposingNewNote, isLoadingEditor, isSaving, saveCurrentNote]);
-    
-    // useEffect(() => {
-    //     if (autoSave && (activeNoteId || isComposingNewNote) && !isLoadingEditor && !isSaving) {
-    //         // Only call debouncedSave if there's actual content to save for a new note
-    //         if (isComposingNewNote && (noteTitle.trim() || noteContent.trim() || tags.length > 0)) {
-    //             debouncedSave(noteTitle, noteContent, tags);
-    //         } else if (activeNoteId) {
-    //             debouncedSave(noteTitle, noteContent, tags);
-    //         }
-    //     }
-    // }, [noteTitle, noteContent, tags, autoSave, activeNoteId, isComposingNewNote, isLoadingEditor, isSaving, debouncedSave]);
+    useEffect(() => {
+        if (autoSave && (activeNoteId || isComposingNewNote) && !isLoadingEditor && !isSaving) {
+            // Only call debouncedSave if there's actual content to save for a new note
+            if (isComposingNewNote && (noteTitle.trim() || noteContent.trim() || tags.length > 0)) {
+                debouncedSave(noteTitle, noteContent, tags);
+            } else if (activeNoteId) { // If editing an existing note, always try to save changes
+                debouncedSave(noteTitle, noteContent, tags);
+            }
+        }
+    }, [noteTitle, noteContent, tags, autoSave, activeNoteId, isComposingNewNote, isLoadingEditor, isSaving, debouncedSave]);
 
     const handleNoteTitleChange = (event: React.ChangeEvent<HTMLInputElement>) => setNoteTitle(event.target.value);
     const handleNoteContentChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => setNoteContent(event.target.value);
@@ -284,6 +293,34 @@ const QuickNotes: React.FC = () => {
     const showSelectNotePlaceholder = !isLoading && !activeNoteId && !isComposingNewNote && notesList.length > 0;
     const showCreateFirstNotePlaceholder = !isLoading && !activeNoteId && !isComposingNewNote && notesList.length === 0;
 
+    useImperativeHandle(ref, () => ({
+        async triggerSaveIfAutoSaveEnabled() {
+            if (autoSave) {
+                console.log('[QuickNotes] Modal closing, auto-save is ON. Attempting to save...');
+                // Ensure currentUser is available before saving
+                if (!currentUser) {
+                    toast({ title: "Save Error", description: "Cannot save on close: User not authenticated.", variant: "destructive" });
+                    return;
+                }
+                // Only save if there's something to save for a new note, or if it's an existing note
+                if (isComposingNewNote && (!noteTitle.trim() && !noteContent.trim() && tags.length === 0)) {
+                    console.log('[QuickNotes] Modal closing, auto-save ON, but new note is empty. Skipping save.');
+                    return;
+                }
+                
+                const saved = await saveCurrentNote(noteTitle, noteContent, tags);
+                if (saved) {
+                    toast({ title: "Note Auto-Saved", description: `'${saved.title || 'Untitled Note'}' was saved as you closed the notes.`, duration: 4000 });
+                } else if (activeNoteId || isComposingNewNote) { // Only toast failure if we expected a save
+                    // saveCurrentNote already toasts specific errors, this is a fallback
+                    // toast({ title: "Save Unsuccessful", description: "Could not auto-save note on close.", variant: "default" });
+                }
+            } else {
+                console.log('[QuickNotes] Modal closing, auto-save is OFF. No save action taken.');
+            }
+        }
+    }));
+
     if (isLoading && !currentUser) {
         return (
             <div className="flex items-center justify-center p-10 min-h-[400px]">
@@ -294,8 +331,8 @@ const QuickNotes: React.FC = () => {
     }
 
     return (
-        <div className="flex gap-4 -m-2 h-[calc(70vh-1rem)]"> {/* Adjusted height slightly */} 
-            <div className="w-1/3 lg:w-1/4 border-r pr-2 py-2 flex flex-col bg-muted/30 rounded-l-md h-full">
+        <div className="flex flex-col md:flex-row gap-4 -m-2 h-auto md:h-[calc(70vh-1rem)]"> {/* Adjusted height & flex direction */} 
+            <div className="w-full md:w-1/3 border-r-0 md:border-r pr-0 md:pr-2 py-2 flex flex-col bg-muted/30 rounded-l-md h-64 md:h-full"> {/* Width, border, height changes */}
                 <div className="flex justify-between items-center mb-2 px-2">
                     <h2 className="text-lg font-semibold flex items-center"><ListChecksIcon className="mr-2 h-5 w-5 text-primary"/> My Notes</h2>
                     <Button variant="outline" size="icon" onClick={handleNewNote} title="Create New Note" className="h-8 w-8 shrink-0">
@@ -317,15 +354,26 @@ const QuickNotes: React.FC = () => {
                             {notesList.map(note => (
                                 <li 
                                     key={note.id}
-                                    className={`w-full justify-start h-auto py-2 px-3 text-left block group relative rounded-md cursor-pointer transition-colors ${activeNoteId === note.id ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}
+                                    className={`flex items-center justify-between w-full h-auto py-2 px-3 text-left group relative rounded-md cursor-pointer transition-colors ${activeNoteId === note.id ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}
                                     onClick={() => selectNoteToEdit(note.id)}
                                     role="button"
                                     tabIndex={0}
                                     onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') selectNoteToEdit(note.id); }}
                                 >
-                                    <span className={`font-medium block truncate`}>{getNoteDisplayTitle(note)}</span>
-                                    <span className={`text-xs block ${activeNoteId === note.id ? 'text-primary-foreground/80' : 'text-muted-foreground/90'}`}>Updated: {new Date(note.updated_at).toLocaleDateString()}</span>
-                                    <Button variant="ghost" size="icon" className="absolute top-1/2 right-1.5 -translate-y-1/2 h-7 w-7 opacity-0 group-hover:opacity-100 focus-within:opacity-100 group-focus:opacity-100 hover:text-destructive hover:bg-destructive/10 z-10" onClick={(e) => { e.stopPropagation(); setShowDeleteConfirm(note.id); }} title="Delete this note">
+                                    <div className="flex-grow overflow-hidden mr-2 min-w-0"> {/* Content wrapper with min-w-0 */}
+                                        <span className={`font-medium block truncate`}>{getNoteDisplayTitle(note)}</span>
+                                        {note.tags && note.tags.length > 0 && (
+                                            <div className="mt-1 flex flex-wrap gap-1">
+                                                {note.tags.map(tag => (
+                                                    <span key={tag} className={`px-1.5 py-0.5 rounded-sm text-[0.7rem] ${activeNoteId === note.id ? 'bg-primary-foreground/20 text-primary-foreground' : 'bg-muted-foreground/10 text-muted-foreground'}`}>
+                                                        #{tag}
+                                                    </span>
+                                                ))}
+                                            </div>
+                                        )}
+                                        <span className={`text-xs block mt-1 ${activeNoteId === note.id ? 'text-primary-foreground/80' : 'text-muted-foreground/90'}`}>Updated: {new Date(note.updated_at).toLocaleDateString()}</span>
+                                    </div>
+                                    <Button variant="ghost" size="icon" className="flex-shrink-0 h-7 w-7 opacity-0 group-hover:opacity-100 focus-within:opacity-100 group-focus:opacity-100 hover:text-destructive hover:bg-destructive/10 z-10" onClick={(e) => { e.stopPropagation(); setShowDeleteConfirm(note.id); }} title="Delete this note">
                                         <Trash2Icon className="h-4 w-4" />
                                     </Button>
                                 </li>
@@ -335,7 +383,7 @@ const QuickNotes: React.FC = () => {
                 </ScrollArea>
             </div>
 
-            <div className="w-2/3 lg:w-3/4 pl-2 py-2 flex flex-col h-full">
+            <div className="w-full md:w-2/3 pl-0 md:pl-2 py-2 flex flex-col h-full mt-4 md:mt-0"> {/* Width and margin changes */}
                 {isLoadingEditor && (
                     <div className="flex-grow flex items-center justify-center">
                         <Loader2 className="h-8 w-8 animate-spin text-primary" /><p className="ml-3 text-muted-foreground">Loading editor...</p>
@@ -394,18 +442,18 @@ const QuickNotes: React.FC = () => {
                             )}
                         </div>
                         
-                        <CardFooter className="p-0 pt-2 border-t flex flex-col sm:flex-row items-center justify-between gap-2.5">
-                            <div className="flex items-center gap-2">
-                                <Button onClick={handleManualSave} size="sm" disabled={isSaving || isLoadingEditor || (!activeNoteId && !isComposingNewNote && !noteTitle && !noteContent && tags.length === 0)}>
+                        <CardFooter className="p-0 pt-2 border-t flex flex-col items-start md:flex-row md:items-center justify-between gap-2.5"> {/* Ensure items-start for stacked layout */}
+                            <div className="flex flex-col xs:flex-row items-start xs:items-center gap-2 w-full xs:w-auto"> {/* Stack buttons on very small, then row */}
+                                <Button onClick={handleManualSave} size="sm" disabled={isSaving || isLoadingEditor || (!activeNoteId && !isComposingNewNote && !noteTitle && !noteContent && tags.length === 0)} className="w-full xs:w-auto">
                                     {isSaving && !autoSave ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <SaveIcon className="mr-2 h-4 w-4"/>}
                                     {activeNoteId ? 'Save Changes' : 'Save New Note'}
                                 </Button>
-                                 <div className="flex items-center space-x-1.5">
+                                 <div className="flex items-center space-x-1.5 mt-2 xs:mt-0">
                                     <Switch id="auto-save-quicknotes" checked={autoSave} onCheckedChange={toggleAutoSave} disabled={isLoadingEditor} />
                                     <Label htmlFor="auto-save-quicknotes" className={`cursor-pointer text-sm ${isLoadingEditor ? 'opacity-50' : ''}`}>Auto-save</Label>
                                 </div>
                             </div>
-                            <div className="text-xs text-muted-foreground self-end sm:self-center">
+                            <div className="text-xs text-muted-foreground self-start sm:self-center mt-2 md:mt-0"> {/* self-start for stacked */}
                                 {isSaving && autoSave ? <span className="flex items-center"><Loader2 className="mr-1.5 h-3 w-3 animate-spin" />Saving...</span> : ((activeNoteId || isComposingNewNote) ? `Last updated: ${lastUpdated}` : 'Not saved yet')}
                             </div>
                         </CardFooter>
@@ -433,4 +481,4 @@ const QuickNotes: React.FC = () => {
     );
 };
 
-export default QuickNotes; 
+export default forwardRef(QuickNotes); 
