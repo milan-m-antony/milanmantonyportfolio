@@ -342,22 +342,24 @@ export default function ResumeSectionClientView({
 
       {resumePdfUrl && (
         <Dialog open={isPdfPreviewOpen} onOpenChange={setIsPdfPreviewOpen}>
-          <DialogContent className="max-w-3xl h-[90vh]">
-            <DialogHeader>
+          <DialogContent className="h-[95vh] w-[95vw] sm:h-[90vh] sm:w-[80vw] md:w-[70vw] lg:w-[60vw] p-2 flex flex-col">
+            <DialogHeader className="flex-shrink-0">
               <DialogTitle>Resume PDF Preview</DialogTitle>
-              <DialogDescription>
-                Viewing your resume PDF. You can also download it.
-                {formattedLastUpdated && (<p className="text-xs mt-1">Last Updated: {formattedLastUpdated}</p>)}
+              <DialogDescription asChild>
+                <div>
+                  Viewing your resume PDF. You can also download it.
+                  {formattedLastUpdated && (<div className="text-xs mt-1">Last Updated: {formattedLastUpdated}</div>)}
+                </div>
               </DialogDescription>
             </DialogHeader>
-            <ScrollArea className="h-[calc(90vh-150px)]"> {/* Adjust height as needed */}
+            <div className="flex-grow border rounded-md overflow-hidden">
               <iframe
                 src={resumePdfUrl}
-                className="w-full h-full min-h-[500px]"
+                className="w-full h-full border-0"
                 title="Resume PDF Preview"
               />
-            </ScrollArea>
-            <div className="flex justify-end gap-2 pt-4 border-t">
+            </div>
+            <div className="flex justify-end gap-2 pt-2 border-t flex-shrink-0">
                <Button onClick={handleDownloadClick}><Download className="mr-2 h-4 w-4" />Download PDF</Button>
                <DialogClose asChild><Button variant="outline">Close</Button></DialogClose>
             </div>

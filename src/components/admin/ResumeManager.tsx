@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
-import { PlusCircle, Edit, Trash2, Briefcase, GraduationCap, ListChecks, Languages as LanguagesIcon, FileText as ResumeFileIcon, UploadCloud, Link as LinkIcon, Building, Type as TypeIcon, ChevronDown } from 'lucide-react';
+import { PlusCircle, Edit, Trash2, Briefcase, GraduationCap, ListChecks, Languages as LanguagesIcon, FileText as ResumeFileIcon, UploadCloud, Link as LinkIcon, Building, Type as TypeIcon, ChevronDown, Eye as EyeIcon } from 'lucide-react';
 import NextImage from 'next/image';
 import { supabase } from '@/lib/supabaseClient';
 import type { ResumeExperience, ResumeEducation, ResumeKeySkillCategory, ResumeKeySkill, ResumeLanguage, ResumeMeta, User as SupabaseUser } from '@/types/supabase';
@@ -100,6 +100,8 @@ export default function ResumeManager() {
   const [isLoadingResumeMeta, setIsLoadingResumeMeta] = React.useState(false);
   const [resumePdfFile, setResumePdfFile] = React.useState<File | null>(null);
   const [currentDbResumePdfUrl, setCurrentDbResumePdfUrl] = React.useState<string | null>(null);
+  const [showPdfPreview, setShowPdfPreview] = React.useState(false);
+  const [pdfPreviewUrl, setPdfPreviewUrl] = React.useState<string | null>(null);
 
   // Experience State
   const [experiences, setExperiences] = React.useState<ResumeExperience[]>([]);
@@ -246,6 +248,19 @@ export default function ResumeManager() {
     setIsLoadingResumeMeta(false); 
   };
 
+  const handleOpenPdfPreview = () => {
+    if (currentDbResumePdfUrl) {
+      setPdfPreviewUrl(currentDbResumePdfUrl);
+      setShowPdfPreview(true);
+    } else {
+      toast({
+        title: "No PDF to Preview",
+        description: "Please upload or link a PDF first.",
+        variant: "default"
+      });
+    }
+  };
+
   // Experience CRUD
   const fetchExperiences = async () => { setIsLoadingExperiences(true); const { data, error } = await supabase.from('resume_experience').select('*').order('sort_order', { ascending: true }); if (error) { toast({ title: "Error fetching experiences", description: error.message, variant: "destructive" }); setExperiences([]); } else { setExperiences((data || []).map(item => ({ ...item, description_points: item.description_points || [], icon_image_url: item.icon_image_url || null }))); } setIsLoadingExperiences(false); };
   const onExperienceSubmit: SubmitHandler<ResumeExperienceFormData> = async (formData) => {
@@ -377,7 +392,30 @@ export default function ResumeManager() {
         <CardContent>{isLoadingResumeMeta ? <p className="text-center text-muted-foreground">Loading resume info...</p> : (
           <form onSubmit={resumeMetaForm.handleSubmit(onResumeMetaSubmit)} className="grid gap-6 py-4">
             <div><Label htmlFor="resumeDescription">Overall Resume Description</Label><Textarea id="resumeDescription" {...resumeMetaForm.register("description")} rows={4} placeholder="A brief summary or objective..." />{resumeMetaForm.formState.errors.description && <p className="text-destructive text-sm mt-1">{resumeMetaForm.formState.errors.description.message}</p>}</div>
-            <div className="space-y-2"><Label htmlFor="resume_pdf_file">Resume PDF File</Label><div className="flex items-center gap-3"><Input id="resume_pdf_file" type="file" accept=".pdf" onChange={handleResumePdfFileChange} className="flex-grow"/><UploadCloud className="h-6 w-6 text-muted-foreground"/></div>{resumePdfFile && <p className="text-sm text-muted-foreground mt-1">New file: {resumePdfFile.name}</p>}{currentDbResumePdfUrl && !resumePdfFile && (<div className="mt-2 text-sm">Current PDF: <a href={currentDbResumePdfUrl} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline inline-flex items-center"><LinkIcon className="mr-1 h-4 w-4" />View Current PDF</a></div>)}<div><Label htmlFor="resume_pdf_url_manual" className="text-xs text-muted-foreground">Or enter direct PDF URL (upload overrides)</Label><Input id="resume_pdf_url_manual" {...resumeMetaForm.register("resume_pdf_url")} placeholder="https://example.com/resume.pdf" />{resumeMetaForm.formState.errors.resume_pdf_url && <p className="text-destructive text-sm mt-1">{resumeMetaForm.formState.errors.resume_pdf_url.message}</p>}</div></div>
+            <div className="space-y-2">
+              <Label htmlFor="resume_pdf_file">Resume PDF File</Label>
+              <div className="flex items-center gap-3">
+                <Input id="resume_pdf_file" type="file" accept=".pdf" onChange={handleResumePdfFileChange} className="flex-grow"/>
+                <UploadCloud className="h-6 w-6 text-muted-foreground"/>
+              </div>
+              {resumePdfFile && <p className="text-sm text-muted-foreground mt-1">New file: {resumePdfFile.name}</p>}
+              {currentDbResumePdfUrl && !resumePdfFile && (
+                <div className="mt-2 text-sm flex items-center gap-2">
+                  Current PDF: 
+                  <a href={currentDbResumePdfUrl} target="_blank" rel="noopener noreferrer" className={cn(buttonVariants({ variant: "link", size: "sm" }), "p-0 h-auto inline-flex items-center")}>
+                    <LinkIcon className="mr-1 h-4 w-4" />View Current PDF
+                  </a>
+                  <Button type="button" variant="outline" size="sm" onClick={handleOpenPdfPreview} className="h-auto py-1 px-2">
+                    <EyeIcon className="mr-1 h-4 w-4" /> Preview PDF
+                  </Button>
+                </div>
+              )}
+              <div>
+                <Label htmlFor="resume_pdf_url_manual" className="text-xs text-muted-foreground">Or enter direct PDF URL (upload overrides)</Label>
+                <Input id="resume_pdf_url_manual" {...resumeMetaForm.register("resume_pdf_url")} placeholder="https://example.com/resume.pdf" />
+                {resumeMetaForm.formState.errors.resume_pdf_url && <p className="text-destructive text-sm mt-1">{resumeMetaForm.formState.errors.resume_pdf_url.message}</p>}
+              </div>
+            </div>
             <Button type="submit" className="w-full sm:w-auto justify-self-start" disabled={isLoadingResumeMeta}>{isLoadingResumeMeta ? 'Saving...' : 'Save Resume Info'}</Button>
           </form>
         )}</CardContent>
@@ -480,6 +518,34 @@ export default function ResumeManager() {
       {/* Language Modal & Delete Dialog */}
       <Dialog open={isLanguageModalOpen} onOpenChange={(isOpen) => { setIsLanguageModalOpen(isOpen); if (!isOpen) setCurrentLanguage(null); }}><DialogContent className="sm:max-w-md"><DialogHeader><DialogTitle>{currentLanguage ? 'Edit Language' : 'Add New Language'}</DialogTitle></DialogHeader><form onSubmit={languageForm.handleSubmit(onLanguageSubmit)} className="grid gap-4 py-4"><ScrollArea className="max-h-[70vh] p-1 pr-2"><div className="grid gap-4 p-3"><div className="space-y-1.5"><Label htmlFor="language_name">Language Name</Label><Input id="language_name" {...languageForm.register("language_name")} />{languageForm.formState.errors.language_name && <p className="text-destructive text-sm mt-1">{languageForm.formState.errors.language_name.message}</p>}</div><div className="space-y-1.5"><Label htmlFor="proficiency">Proficiency (e.g., Native, Fluent, Conversational)</Label><Input id="proficiency" {...languageForm.register("proficiency")} /></div><div className="space-y-1.5"><Label htmlFor="lang_icon_image_url">Icon Image URL (Optional)</Label><Input id="lang_icon_image_url" {...languageForm.register("icon_image_url")} placeholder="https://..." />{languageForm.formState.errors.icon_image_url && <p className="text-destructive text-sm mt-1">{languageForm.formState.errors.icon_image_url.message}</p>}{watchedLanguageIconUrl && (<div className="mt-2 flex items-center gap-2"><span className="text-xs">Preview:</span><IconPreview url={watchedLanguageIconUrl} DefaultIcon={LanguagesIcon} className="h-5 w-5 p-0"/></div>)}</div><div className="space-y-1.5"><Label htmlFor="lang_sort_order">Sort Order</Label><Input id="lang_sort_order" type="number" {...languageForm.register("sort_order")} /></div></div></ScrollArea><DialogFooter className="pt-4 border-t"><DialogClose asChild><Button type="button" variant="outline" className="w-full sm:w-auto">Cancel</Button></DialogClose><Button type="submit" className="w-full sm:w-auto">{currentLanguage ? 'Save Changes' : 'Add Language'}</Button></DialogFooter></form></DialogContent></Dialog>
       <AlertDialog open={showLanguageDeleteConfirm} onOpenChange={setShowLanguageDeleteConfirm}><AlertDialogContent className="bg-destructive border-destructive text-destructive-foreground"><AlertDialogPrimitiveHeader><AlertDialogPrimitiveTitle className="text-destructive-foreground">Delete Language: {languageToDelete?.language_name}?</AlertDialogPrimitiveTitle><AlertDialogDescription className="text-destructive-foreground/90">This action cannot be undone.</AlertDialogDescription></AlertDialogPrimitiveHeader><AlertDialogPrimitiveFooter><AlertDialogCancel onClick={() => { setLanguageToDelete(null); setShowLanguageDeleteConfirm(false);}} className={cn(buttonVariants({ variant: "outline" }), "border-destructive-foreground/40 text-destructive-foreground hover:bg-destructive-foreground/10 hover:text-destructive-foreground hover:border-destructive-foreground/60")}>Cancel</AlertDialogCancel><AlertDialogAction onClick={handleDeleteLanguage} className={cn(buttonVariants({ variant: "default" }), "bg-destructive-foreground text-destructive hover:bg-destructive-foreground/90")}>Delete Language</AlertDialogAction></AlertDialogPrimitiveFooter></AlertDialogContent></AlertDialog>
+
+      {/* PDF Preview Lightbox Dialog */}
+      <Dialog open={showPdfPreview} onOpenChange={setShowPdfPreview}>
+        <DialogContent className="max-w-3xl h-[90vh] p-2 sm:p-4 flex flex-col">
+          <DialogHeader className="flex-shrink-0">
+            <DialogTitle>Resume PDF Preview</DialogTitle>
+            <DialogClose asChild>
+              <Button variant="ghost" size="icon" className="absolute top-3 right-3">
+                <Trash2 className="h-4 w-4" /> {/* Using Trash2 icon as an example for close, consider X icon */}
+                 <span className="sr-only">Close</span>
+              </Button>
+            </DialogClose>
+          </DialogHeader>
+          <div className="flex-grow overflow-hidden">
+            {pdfPreviewUrl ? (
+              <iframe
+                src={pdfPreviewUrl}
+                className="w-full h-full border-0"
+                title="Resume PDF Preview"
+                // For security, consider adding sandbox attributes if PDFs are from untrusted sources
+                // sandbox="allow-scripts allow-same-origin" 
+              />
+            ) : (
+              <p className="text-center text-muted-foreground py-10">No PDF URL to display.</p>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
